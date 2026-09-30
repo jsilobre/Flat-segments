@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -70,6 +71,20 @@ def test_select_for_validation_is_representative_and_deterministic() -> None:
     assert any(s.kind is SegmentKind.CLIMB for s in picked)
     assert any(s.n_crossings > 0 for s in picked)
     assert [s.id for s in picked] == [s.id for s in cal.select_for_validation(segments, 3)]
+
+
+def test_select_for_validation_balances_flats_and_climbs() -> None:
+    segments, _, _ = dataset()
+    flat = next(s for s in segments if s.kind is SegmentKind.FLAT)
+    climb = next(s for s in segments if s.kind is SegmentKind.CLIMB)
+    flats = [replace(flat, id=f"flat-{i}", score=float(i)) for i in range(3)]
+    climbs = [replace(climb, id=f"climb-{i}", score=float(i)) for i in range(30)]
+    picked = cal.select_for_validation(flats + climbs, 4)
+    assert [s.kind for s in picked].count(SegmentKind.FLAT) == 2
+    picked = cal.select_for_validation(flats + climbs, 10)  # only 3 flats
+    assert [s.kind for s in picked].count(SegmentKind.FLAT) == 3
+    assert len(picked) == 10
+    assert len(cal.select_for_validation(climbs, 5)) == 5
 
 
 def test_validation_sheet_is_a_fillable_table() -> None:

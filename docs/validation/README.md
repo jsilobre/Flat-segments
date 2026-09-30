@@ -13,8 +13,10 @@ traversées, les accès et les revêtements sont justes.
    uv run flat-segments validation-sheet --count 20   # → docs/validation/pilot.md
    ```
 
-   L'échantillon est déterministe et représentatif. Les côtes y sont
-   représentées (au moins 3 s'il y en a). Il contient au moins un segment
+   L'échantillon est déterministe et représentatif. Plats et côtes s'y
+   partagent les places à parts égales. Un partage proportionnel ne laissait
+   que 5 plats sur 20 dans la zone pilote, où les côtes sont trois fois plus
+   nombreuses. Il contient au moins un segment
    avec *flag* de qualité (pont, trou du MNT…) et un avec traversée, quand il
    y en a. Le reste est réparti sur toute la plage de scores, pour voir aussi
    les segments moyens et faibles.

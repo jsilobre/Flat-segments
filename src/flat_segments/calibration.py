@@ -249,17 +249,18 @@ def _fr(value: float, digits: int = 1) -> str:
 def select_for_validation(segments: Sequence[Segment], count: int) -> list[Segment]:
     """Pick a deterministic, representative sample for field validation.
 
-    Climbs get a share proportional to their number (at least 3 when there
-    are some). Within a kind, one flagged segment and one with crossings are
-    included when available, then segments evenly spread over the score range.
+    Flats and climbs share the sample equally, whatever their numbers (on
+    the pilot area, climbs outnumber flats three to one, and a proportional
+    share left only 5 flats out of 20); a kind short of segments leaves its
+    places to the other. Within a kind, one flagged segment and one with
+    crossings are included when available, then segments evenly spread over
+    the score range.
     """
     if count >= len(segments):
         return sorted(segments, key=lambda s: (s.kind.value, -s.score))
     flats = sorted((s for s in segments if s.kind is SegmentKind.FLAT), key=lambda s: -s.score)
     climbs = sorted((s for s in segments if s.kind is SegmentKind.CLIMB), key=lambda s: -s.score)
-    n_climbs = min(
-        len(climbs), max(min(3, len(climbs)), round(count * len(climbs) / len(segments)))
-    )
+    n_climbs = min(len(climbs), count // 2 if flats else count)
     n_flats = min(len(flats), count - n_climbs)
     picked: list[Segment] = []
     for items, quota in ((flats, n_flats), (climbs, count - n_flats)):

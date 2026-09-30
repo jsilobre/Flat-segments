@@ -15,6 +15,17 @@ export const DEFAULT_CRITERIA = Object.freeze({
   pavedOnly: false,
 });
 
+/**
+ * Above this sinuosity (length / distance between the ends), a segment is shown
+ * as a loop: its ends are close, and the number itself means little.
+ */
+export const LOOP_SINUOSITY = 3;
+
+/** Whether a segment is (nearly) a loop; `sinuosity` is null for a closed one. */
+export function isLoop(properties) {
+  return properties.sinuosity === null || properties.sinuosity > LOOP_SINUOSITY;
+}
+
 const toRad = (deg) => (deg * Math.PI) / 180;
 
 /** Great-circle distance in metres between two [lon, lat] points. */

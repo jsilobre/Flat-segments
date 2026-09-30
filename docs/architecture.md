@@ -70,19 +70,40 @@ Chaque étape est une commande de la CLI Typer `flat-segments` :
 
 | Commande | Entrée | Sortie | Modules |
 |---|---|---|---|
+| `download-osm` | URL Geofabrik + emprise | `data/raw/midi-pyrenees-latest.osm.pbf`, `data/raw/pilot.osm.pbf` (découpé) | `download.py`, `osm.py` |
+| `download-dem` | emprise + service WMS de la Géoplateforme | `data/raw/rge_alti/tiles/*.tif`, `data/raw/rge_alti/pilot.vrt` | `download.py` |
 | `extract` | extrait OSM `.osm.pbf` + emprise | `data/interim/strokes.parquet` | `osm.py`, `network.py` |
 | `elevation` | strokes + MNT (GeoTIFF/VRT en Lambert-93) | `data/interim/profiles.parquet` | `elevation.py` |
 | `detect` | strokes + profils | `data/processed/segments.parquet` | `profile.py`, `detect.py` |
 | `export` | segments | `web/data/segments.geojson` | `export.py` |
+| `pipeline` | extrait découpé + MNT | les quatre sorties ci-dessus | `pipeline.py` |
 
-Le découpage en quatre commandes permet de régler les seuils de détection
+Le découpage en quatre étapes permet de régler les seuils de détection
 (`detect`) sans relire le PBF ni rééchantillonner le MNT.
+
+**Paramètres.** Les étapes utilisent les valeurs par défaut de `params.py`,
+remplacées par un fichier TOML (`--config`, modèle dans
+`configs/default.toml`) puis par des surcharges `--set cle=valeur`. `detect`
+enregistre les paramètres utilisés à côté de ses segments
+(`segments.params.toml`), et `export` les recopie dans les métadonnées du
+GeoJSON : un jeu publié dit toujours comment il a été produit.
+
+**Calibrage** (phase 1) :
+
+| Commande | Rôle |
+|---|---|
+| `report` | Résumé d'un fichier de segments : nombres, longueurs, longueurs cibles, traversées, revêtements, *flags* |
+| `sweep` | Relance la détection pour plusieurs valeurs d'un paramètre et compare les résultats |
+| `inspect` | Profil brut / lissé et pente locale autour d'un segment (PNG, matplotlib) |
+| `validation-sheet` | Échantillon représentatif de segments sous forme de fiche terrain à remplir ([`validation/`](validation/README.md)) |
+| `config` | Affiche les paramètres effectifs en TOML |
 
 Les modules :
 
 | Module | Rôle | Nature |
 |---|---|---|
-| `params.py` | Paramètres de l'algorithme (dataclasses figées) avec leurs valeurs par défaut | pur |
+| `params.py` | Paramètres de l'algorithme (dataclasses figées, invariants vérifiés) avec leurs valeurs par défaut | pur |
+| `config.py` | Paramètres en TOML : lecture, écriture, surcharges `cle=valeur` | pur + E/S |
 | `geometry.py` | Longueurs, rééchantillonnage, sous-polyligne, sinuosité, caps, distances point-polyligne, id stable | pur |
 | `osm.py` | Classement des voies selon leurs tags OSM ; lecture du PBF (pyosmium) et reprojection | pur + E/S |
 | `network.py` | Graphe des voies, chaînage en *strokes* (polylignes continues), événements (traversées, carrefours) | pur |
@@ -90,6 +111,9 @@ Les modules :
 | `profile.py` | Profil en long : bouche-trous, interpolation sous ponts et tunnels, lissage, pente locale, D+/D- | pur |
 | `detect.py` | Fenêtre glissante, fusion en tronçons maximaux, attributs, score, déduplication | pur |
 | `export.py` | Lecture/écriture GeoParquet, export GeoJSON (WGS84) | E/S |
+| `download.py` | Téléchargements : extrait Geofabrik (MD5), dalles MNT par WMS, assemblage en VRT | E/S |
+| `pipeline.py` | Les quatre étapes sous forme de fonctions, partagées par les commandes | E/S |
+| `calibration.py` | Rapport, balayage de paramètres, graphique de profil, fiche de validation | pur + E/S |
 | `cli.py` | CLI Typer, câblage des étapes | E/S |
 
 Dépendances : numpy (calcul), pyosmium (OSM), pyproj (projections), rasterio
@@ -102,9 +126,14 @@ Au stade prototype, tout le stockage est fait de fichiers dans `data/`
 
 ```
 data/
-├── raw/          # téléchargements : .osm.pbf, dalles RGE ALTI, VRT
+├── raw/
+│   ├── midi-pyrenees-latest.osm.pbf   # extrait Geofabrik
+│   ├── pilot.osm.pbf                  # extrait découpé sur la zone pilote
+│   └── rge_alti/
+│       ├── tiles/*.tif                # dalles MNT (GeoTIFF compressés)
+│       └── pilot.vrt                  # mosaïque virtuelle GDAL
 ├── interim/      # strokes.parquet, profiles.parquet
-└── processed/    # segments.parquet (GeoParquet, Lambert-93)
+└── processed/    # segments.parquet (GeoParquet, Lambert-93), segments.params.toml, inspect/*.png
 ```
 
 Le schéma de chaque table est décrit dans [`data-model.md`](data-model.md).
@@ -118,8 +147,13 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
   avec repli sur un fond uni, couche des segments, panneau de filtres, liste
   des résultats, géolocalisation.
 - `filters.js` : module ES **pur** (distance haversine, distance point-ligne,
-  filtrage, tri), testé avec `node --test` (`web/tests/`, `web/package.json`
-  ne sert qu'aux tests).
+  filtrage, tri, état de l'URL), testé avec `node --test` (`web/tests/`,
+  `web/package.json` ne sert qu'aux tests).
+- **Liens directs** : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
+  position et `?kind=climb` affiche les côtes. L'URL suit la sélection, ce qui
+  sert à partager un segment et à la fiche de validation terrain.
+- **Publication** : le workflow `.github/workflows/pages.yml` déploie `web/`
+  (sans les tests) sur GitHub Pages à chaque modification sur `main`.
 - `data/segments.geojson` : segments réels quand ils existent ;
   `data/sample-segments.geojson` sinon (données fictives).
 
@@ -200,8 +234,8 @@ flowchart TD
 
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
-| **0 — Squelette** *(en cours)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, téléchargements non automatisés (stubs), front sur données fictives, CI | synthétiques | ce dépôt |
-| **1 — Prototype pilote** | Implémentation complète de `extract` et `elevation`, calibrage des seuils sur le terrain (Labège / Caraman), publication GitHub Pages | OSM + RGE ALTI de la zone pilote | site statique en ligne |
+| **0 — Squelette** *(terminée)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, front sur données fictives, CI | synthétiques | ce dépôt |
+| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages *(faits)* ; exécution sur les vraies données, calibrage des seuils et validation terrain (Labège / Caraman), publication *(à faire)* | OSM + RGE ALTI de la zone pilote | site statique en ligne |
 | **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + RGE ALTI par département | site statique + PMTiles |
 | **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |
 
@@ -216,7 +250,10 @@ réellement plats, traversées correctement comptées).
 - **Lint et types** : ruff (lint + format), mypy en mode strict.
 - **pre-commit** : ruff, mypy, hygiène des fichiers, refus des gros fichiers
   (aucune donnée volumineuse dans Git).
-- **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13), tests JS.
+- **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13), tests JS ;
+  déploiement GitHub Pages du front depuis `main`.
+- **Réseau** : les téléchargements passent par une fonction d'ouverture d'URL
+  injectable, ce qui permet de tout tester hors ligne (faux serveur WMS).
 
 ## 7. Pièges connus
 

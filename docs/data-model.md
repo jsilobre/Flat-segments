@@ -79,7 +79,15 @@ Champs **internes**, présents seulement dans le GeoParquet :
 
 `FeatureCollection` conforme à la RFC 7946 : WGS84, coordonnées `[lon, lat]`
 arrondies à 6 décimales. Les champs internes sont retirés. Un membre
-`metadata` (membre étranger, toléré par la RFC) décrit l'export.
+`metadata` (membre étranger, toléré par la RFC) décrit l'export :
+
+| Clé | Contenu |
+|---|---|
+| `schema_version` | Version de ce schéma |
+| `generated_at` | Date de l'export (UTC) |
+| `sample` | `true` pour des données fictives (bandeau sur la carte) |
+| `attribution` | Mentions affichées sur la carte |
+| `params` | Paramètres de détection utilisés, même structure que `configs/default.toml` (présent si `detect` les a enregistrés) |
 
 ```json
 {
@@ -91,7 +99,8 @@ arrondies à 6 décimales. Les champs internes sont retirés. Un membre
     "attribution": [
       "© les contributeurs d'OpenStreetMap (ODbL)",
       "IGN – RGE ALTI® (Licence Ouverte 2.0)"
-    ]
+    ],
+    "params": {"network": {"max_deflection_deg": 35.0, "…": "…"}, "…": "…"}
   },
   "features": [
     {
@@ -149,6 +158,13 @@ En Python : `flat_segments.network.Stroke`.
 | `is_ring` | `bool` | Stroke fermé (anneau) |
 | `parts` | `str` (JSON) | Liste de `StrokePart` : `way_id`, `start_m`, `end_m`, `highway`, `road_class`, `surface`, `tracktype`, `lit`, `structure`, `name` |
 | `events` | `str` (JSON) | Liste de `StrokeEvent` : `offset_m`, `kind` (`crossing` \| `junction`), `node_id` |
+
+### Paramètres de détection (`data/processed/segments.params.toml`)
+
+Écrit par `detect` à côté de `segments.parquet`. C'est le TOML complet des
+paramètres utilisés, au format de `configs/default.toml`. `export` le recopie
+dans `metadata.params`, et `inspect` le relit pour tracer les seuils qui ont
+réellement servi.
 
 ### `profiles` (`data/interim/profiles.parquet`)
 

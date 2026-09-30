@@ -410,7 +410,9 @@ async function loadData() {
 
 function addAttribution(dataAttribution) {
   // Basemap attributions come from the style sources; segments derive from OSM.
-  const custom = [...new Set(["© contributeurs OpenStreetMap (ODbL)", ...dataAttribution])];
+  // Same wording as the pipeline export (export.OSM_ATTRIBUTION), so that the
+  // Set drops the duplicate.
+  const custom = [...new Set(["© les contributeurs d'OpenStreetMap (ODbL)", ...dataAttribution])];
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: custom }));
 }
 

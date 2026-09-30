@@ -44,6 +44,27 @@ def test_geojson_structure_and_rounding() -> None:
     assert "stroke_id" not in props
 
 
+def test_attribution_follows_the_elevation_sources() -> None:
+    [segment] = sample_segments()
+    lidar, rge = (
+        replace(segment, elevation_source="lidar_hd"),
+        replace(segment, elevation_source="rge_alti_1m"),
+    )
+    assert ex.attribution_for([segment]) == [ex.OSM_ATTRIBUTION]
+    assert ex.attribution_for([lidar, lidar]) == [
+        ex.OSM_ATTRIBUTION,
+        ex.SOURCE_ATTRIBUTION["lidar_hd"],
+    ]
+    metadata = ex.segments_to_geojson([lidar, rge], identity)["metadata"]
+    assert metadata["attribution"] == [
+        ex.OSM_ATTRIBUTION,
+        "IGN – MNT LiDAR HD (Licence Ouverte 2.0)",  # noqa: RUF001
+        "IGN – RGE ALTI® (Licence Ouverte 2.0)",  # noqa: RUF001
+    ]
+    custom = ex.segments_to_geojson([lidar], identity, attribution=["x"])["metadata"]
+    assert custom["attribution"] == ["x"]
+
+
 def test_geojson_default_projection_is_wgs84(tmp_path: Path) -> None:
     [segment] = sample_segments()
     moved = replace(segment, coords=segment.coords + np.array([581_000.0, 6_271_000.0]))

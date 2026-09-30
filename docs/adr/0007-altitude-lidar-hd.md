@@ -59,8 +59,10 @@ sondage sur 98, un par dalle de 2 km.
   | km LiDAR HD retrouvés avec le RGE ALTI (à 10 m près) | 92 % | 97 % |
 
   Le lissage (σ = 10 m) et le pas de 5 m absorbent l'essentiel de la
-  résolution grossière du RGE ALTI : l'écart porte sur 5 à 8 % des plats,
-  justement ceux dont la pente est proche des seuils.
+  résolution grossière du RGE ALTI : l'écart porte sur 5 à 8 % des plats.
+  Les 81 plats du LiDAR HD que le RGE ALTI manque en majorité sont plus courts
+  (médiane 230 m contre 317 m) et plus proches des seuils : leur pente moyenne
+  médiane, en valeur absolue, vaut 0,45 % contre 0,25 %.
 - Profils plus précis et homogènes : la précision du LiDAR HD est décimétrique
   partout, alors que le RGE ALTI mêle LiDAR, radar et corrélation d'images.
 - Même projection et même type de raster : aucun changement dans le pipeline

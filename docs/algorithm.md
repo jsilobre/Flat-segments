@@ -212,6 +212,10 @@ Une fenêtre est valide pour le sens `s` si :
   `[climb.max_flat_stretch_m]` = 20 m
 - `sinuosité ≤ [climb.max_sinuosity]` = 1,5 (lacets tolérés)
 
+Le replat est mesuré sur la pente **lissée** `g`. Le lissage et la base de
+20 m le raccourcissent d'environ 25 m par rapport au terrain : un replat réel
+de 40 m est toléré, un replat de 60 m coupe la côte (vérifié par les tests).
+
 Les traversées ne rendent pas une fenêtre invalide. Elles sont comptées,
 pénalisées dans le score (§ 10), et le front peut exiger « 0 traversée ».
 
@@ -227,8 +231,11 @@ Voir [ADR 0006](adr/0006-strokes-et-troncons-maximaux.md).
   moyenne globale n'est pas bornée par 1 %, mais elle reste ≤ à la pente
   locale max (2 %). Les statistiques réelles sont calculées et publiées, et
   le front filtre dessus.
-- **Côte** : on **rogne** les extrémités tant que `s × g < min_local_grade`
-  (retire les amorces et fins de pente molles). Si le tronçon rogné mesure
+- **Côte** : deux unions de fenêtres valides peuvent se rejoindre au milieu
+  d'un replat. On **coupe** donc le tronçon fusionné autour de tout replat
+  (`s × g < min_local_grade`) plus long que `max_flat_stretch_m`. Puis on
+  **rogne** les extrémités tant que `s × g < min_local_grade` (retire les
+  amorces et fins de pente molles). Si le tronçon rogné mesure
   moins de `W₀`, il est abandonné. Le segment est orienté **vers le haut** :
   si `s = −1`, géométrie et profil sont inversés, et la pente moyenne publiée
   est positive.

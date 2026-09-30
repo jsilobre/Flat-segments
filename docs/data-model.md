@@ -50,7 +50,7 @@ Fichiers : `data/processed/segments.parquet` (GeoParquet) et
 | `quality_flags` | `list[str]` | — | Voir ci-dessous |
 | `fits_targets_m` | `list[int]` | m | Longueurs cibles réalisables dans le segment (§ 8 de l'algorithme) |
 | `score` | `float` | 0–100 | Qualité globale, voir [`algorithm.md` § 10](algorithm.md#10-score) |
-| `elevation_source` | `str` | — | Source d'altitude : `rge_alti_1m` (ou `lidar_hd`, `copernicus_glo30`, `synthetic`) |
+| `elevation_source` | `str` | — | Source d'altitude : `lidar_hd` (MNT LiDAR HD, défaut), `rge_alti_1m` (archive RGE ALTI), `rge_alti_wms` (RGE ALTI par WMS, ≈ 4 m), `copernicus_glo30`, `synthetic` |
 
 Champs **internes**, présents seulement dans le GeoParquet :
 
@@ -86,7 +86,7 @@ arrondies à 6 décimales. Les champs internes sont retirés. Un membre
 | `schema_version` | Version de ce schéma |
 | `generated_at` | Date de l'export (UTC) |
 | `sample` | `true` pour des données fictives (bandeau sur la carte) |
-| `attribution` | Mentions affichées sur la carte |
+| `attribution` | Mentions affichées sur la carte : OSM, puis chaque source d'altitude présente |
 | `params` | Paramètres de détection utilisés, même structure que `configs/default.toml` (présent si `detect` les a enregistrés) |
 
 ```json
@@ -98,7 +98,7 @@ arrondies à 6 décimales. Les champs internes sont retirés. Un membre
     "sample": false,
     "attribution": [
       "© les contributeurs d'OpenStreetMap (ODbL)",
-      "IGN – RGE ALTI® (Licence Ouverte 2.0)"
+      "IGN – MNT LiDAR HD (Licence Ouverte 2.0)"
     ],
     "params": {"network": {"max_deflection_deg": 35.0, "…": "…"}, "…": "…"}
   },
@@ -132,7 +132,7 @@ arrondies à 6 décimales. Les champs internes sont retirés. Un membre
         "quality_flags": [],
         "fits_targets_m": [200, 400],
         "score": 86.4,
-        "elevation_source": "rge_alti_1m"
+        "elevation_source": "lidar_hd"
       }
     }
   ]

@@ -1,6 +1,6 @@
 # 0003 — Altitude : RGE ALTI® 1 m de l'IGN
 
-- **Statut** : Acceptée
+- **Statut** : Remplacée par [ADR 0007](0007-altitude-lidar-hd.md)
 - **Date** : 2026-09-30
 
 ## Contexte

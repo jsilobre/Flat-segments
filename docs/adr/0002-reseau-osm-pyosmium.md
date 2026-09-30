@@ -14,7 +14,9 @@ cela, librement, sur toute la France.
 ## Décision
 
 - Source : **extrait Geofabrik** `europe/france/midi-pyrenees` (PBF), découpé
-  sur l'emprise de la zone pilote.
+  sur l'emprise de la zone pilote. Le miroir d'OpenStreetMap France
+  (`download.openstreetmap.fr`, même découpage, avec `.md5`) le remplace quand
+  Geofabrik est inaccessible.
 - Lecture avec **pyosmium** (`osmium` sur PyPI) : lecture en flux filtrée sur
   `highway`, coordonnées des nœuds résolues, **identifiants de nœuds
   conservés**. Reprojection immédiate en Lambert-93.

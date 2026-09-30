@@ -34,7 +34,7 @@ dans les [ADR](adr/README.md), et le détail des calculs dans
 flowchart LR
     subgraph Sources
         OSM[("Extrait OSM<br/>Geofabrik<br/>.osm.pbf")]
-        DEM[("RGE ALTI 1 m<br/>IGN<br/>dalles ASC / VRT")]
+        DEM[("MNT LiDAR HD<br/>IGN (WMS)<br/>dalles GeoTIFF / VRT")]
     end
 
     subgraph Pipeline["Pipeline hors ligne (Python, uv)"]
@@ -70,8 +70,8 @@ Chaque étape est une commande de la CLI Typer `flat-segments` :
 
 | Commande | Entrée | Sortie | Modules |
 |---|---|---|---|
-| `download-osm` | URL Geofabrik + emprise | `data/raw/midi-pyrenees-latest.osm.pbf`, `data/raw/pilot.osm.pbf` (découpé) | `download.py`, `osm.py` |
-| `download-dem` | emprise + service WMS de la Géoplateforme | `data/raw/rge_alti/tiles/*.tif`, `data/raw/rge_alti/pilot.vrt` | `download.py` |
+| `download-osm` | URL de l'extrait (Geofabrik ou miroir OSM France) + emprise | `data/raw/midi-pyrenees-latest.osm.pbf` (ou `midi_pyrenees.osm.pbf`), `data/raw/pilot.osm.pbf` (découpé) | `download.py`, `osm.py` |
+| `download-dem` | emprise + service WMS de la Géoplateforme | `data/raw/dem/tiles/*.tif`, `data/raw/dem/pilot.vrt` | `download.py` |
 | `extract` | extrait OSM `.osm.pbf` + emprise | `data/interim/strokes.parquet` | `osm.py`, `network.py` |
 | `elevation` | strokes + MNT (GeoTIFF/VRT en Lambert-93) | `data/interim/profiles.parquet` | `elevation.py` |
 | `detect` | strokes + profils | `data/processed/segments.parquet` | `profile.py`, `detect.py` |
@@ -111,7 +111,7 @@ Les modules :
 | `profile.py` | Profil en long : bouche-trous, interpolation sous ponts et tunnels, lissage, pente locale, D+/D- | pur |
 | `detect.py` | Fenêtre glissante, fusion en tronçons maximaux, attributs, score, déduplication | pur |
 | `export.py` | Lecture/écriture GeoParquet, export GeoJSON (WGS84) | E/S |
-| `download.py` | Téléchargements : extrait Geofabrik (MD5), dalles MNT par WMS, assemblage en VRT | E/S |
+| `download.py` | Téléchargements : extrait OSM (MD5), dalles MNT par WMS, assemblage en VRT | E/S |
 | `pipeline.py` | Les quatre étapes sous forme de fonctions, partagées par les commandes | E/S |
 | `calibration.py` | Rapport, balayage de paramètres, graphique de profil, fiche de validation | pur + E/S |
 | `cli.py` | CLI Typer, câblage des étapes | E/S |
@@ -127,10 +127,10 @@ Au stade prototype, tout le stockage est fait de fichiers dans `data/`
 ```
 data/
 ├── raw/
-│   ├── midi-pyrenees-latest.osm.pbf   # extrait Geofabrik
+│   ├── midi-pyrenees-latest.osm.pbf   # extrait régional (Geofabrik ou miroir)
 │   ├── pilot.osm.pbf                  # extrait découpé sur la zone pilote
-│   └── rge_alti/
-│       ├── tiles/*.tif                # dalles MNT (GeoTIFF compressés)
+│   └── dem/
+│       ├── tiles/*.tif                # dalles MNT LiDAR HD (GeoTIFF compressés)
 │       └── pilot.vrt                  # mosaïque virtuelle GDAL
 ├── interim/      # strokes.parquet, profiles.parquet
 └── processed/    # segments.parquet (GeoParquet, Lambert-93), segments.params.toml, inspect/*.png
@@ -220,7 +220,7 @@ flowchart TD
     B -->|"reprojection EPSG:2154"| C["Ways en Lambert-93"]
     C -->|"découpage aux nœuds partagés<br/>chaînage par continuité"| D["Strokes<br/>+ tronçons OSM + événements"]
     D -->|"rééchantillonnage tous les 5 m"| E["Points (x, y)"]
-    F["MNT RGE ALTI 1 m"] -->|bilinéaire| G["z brut"]
+    F["MNT LiDAR HD, 1 m"] -->|bilinéaire| G["z brut"]
     E --> G
     G -->|"ponts/tunnels : interpolation<br/>trous courts : interpolation<br/>médiane + gaussienne"| H["Profil lissé + pente locale"]
     H -->|"fenêtre glissante<br/>critères plat / côte"| I["Fenêtres valides"]
@@ -235,8 +235,8 @@ flowchart TD
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
 | **0 — Squelette** *(terminée)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, front sur données fictives, CI | synthétiques | ce dépôt |
-| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages *(faits)* ; exécution sur les vraies données, calibrage des seuils et validation terrain (Labège / Caraman), publication *(à faire)* | OSM + RGE ALTI de la zone pilote | site statique en ligne |
-| **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + RGE ALTI par département | site statique + PMTiles |
+| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages *(faits)* ; exécution sur les vraies données, calibrage des seuils et validation terrain (Labège / Caraman), publication *(à faire)* | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
+| **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + MNT LiDAR HD (RGE ALTI où il manque) | site statique + PMTiles |
 | **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |
 
 Critère de passage de la phase 1 à la phase 2 : sur un échantillon de segments
@@ -262,7 +262,7 @@ réellement plats, traversées correctement comptées).
 | Ponts, passerelles | Le MNT donne l'altitude du sol **sous** l'ouvrage (rivière, route) : fausse descente puis remontée | Tags `bridge=*` : altitude interpolée linéairement entre les culées, segment marqué `bridge_interpolated` |
 | Tunnels, passages souterrains | Le MNT donne l'altitude **au-dessus** : fausse bosse | Tags `tunnel=*` / `covered=yes` : même interpolation, marquage `tunnel_interpolated` |
 | Talus, remblais, digues | Un décalage de la géométrie OSM de 2 à 5 m fait tomber les points sur le flanc du talus : bruit de profil | Lissage ; échantillonnage transversal (médiane sur ±2 m) en option ; `layer` et `embankment` notés |
-| Qualité variable du RGE ALTI | Précision décimétrique en zone LiDAR, métrique en zone de corrélation | Voir [`data-sources.md`](data-sources.md) ; à terme, source et précision du MNT par segment |
+| Qualité variable du MNT | RGE ALTI : précision décimétrique en zone LiDAR, métrique en zone de corrélation, et résolution effective d'environ 4 m par le WMS | MNT LiDAR HD par défaut ([ADR 0007](adr/0007-altitude-lidar-hd.md)) ; source du MNT publiée par segment (`elevation_source`) |
 | Qualité OSM variable | Revêtement ou éclairage souvent absents ; traversées non modélisées si les voies ne partagent pas de nœud | Valeur `unknown` explicite ; validation terrain en phase 1 |
 | Trottoirs cartographiés en double | Un trottoir `footway=sidewalk` et sa rue donnent deux segments quasi identiques | Déduplication géométrique (§ 9 de l'algorithme) |
 | Routes ≥ `tertiary` avec trottoir non cartographié séparément | Tronçon ignoré, alors qu'il serait praticable | Limite assumée au prototype |

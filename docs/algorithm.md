@@ -113,7 +113,8 @@ qui se prolonge en rue résidentielle. Il ne franchit jamais une route `MAJOR`.
    intervalles égaux, avec `[profile.step_m]` = 5 m. Le pas effectif `L / n`
    est donc ≤ 5 m, et l'étape `detect` retrouve exactement la même grille.
 2. L'altitude est lue dans le MNT par **interpolation bilinéaire** : le
-   RGE ALTI est au pas de 1 m, et l'interpolation évite les marches d'escalier.
+   MNT est au pas de 1 m (LiDAR HD, [ADR 0007](adr/0007-altitude-lidar-hd.md)), et
+   l'interpolation évite les marches d'escalier.
 3. *(option)* **Échantillonnage transversal** : si
    `[profile.lateral_offset_m]` > 0, on échantillonne aussi à ± cette
    distance, perpendiculairement au tracé, et on garde la médiane des trois

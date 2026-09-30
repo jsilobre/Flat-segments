@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Callable
 from typing import Final
 
 import numpy as np
@@ -16,6 +17,9 @@ from numpy.typing import ArrayLike, NDArray
 FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.intp]
+
+#: Coordinate transformation of ``(N, 2)`` arrays between two CRS.
+Projector = Callable[[FloatArray], FloatArray]
 
 _EPS: Final = 1e-9
 
@@ -188,3 +192,19 @@ def stable_id(kind: str, coords: FloatArray, grid_m: float = 10.0) -> str:
     length = round(polyline_length(coords) / grid_m)
     key = f"{kind}|{ends[0][0]}|{ends[0][1]}|{ends[1][0]}|{ends[1][1]}|{length}"
     return f"{kind}-{hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:12]}"
+
+
+def make_projector(source_crs: str, target_crs: str) -> Projector:
+    """Return a function transforming ``(N, 2)`` arrays from one CRS to another.
+
+    Coordinates are always in ``(x, y)`` / ``(lon, lat)`` order.
+    """
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs(source_crs, target_crs, always_xy=True)
+
+    def project(points: FloatArray) -> FloatArray:
+        x, y = transformer.transform(points[:, 0], points[:, 1])
+        return np.column_stack((x, y))
+
+    return project

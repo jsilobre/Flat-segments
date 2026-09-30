@@ -7,13 +7,13 @@ returns :class:`~flat_segments.network.Way` objects projected to Lambert-93.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 
-from flat_segments.geometry import FloatArray
+from flat_segments.geometry import FloatArray, Projector, make_projector
 from flat_segments.network import RoadClass, Way
 from flat_segments.params import WORK_CRS
 
@@ -196,22 +196,6 @@ def way_from_osm(
     )
 
 
-Projector = Callable[[FloatArray], FloatArray]
-
-
-def lonlat_projector(target_crs: str = WORK_CRS) -> Projector:
-    """Return a function projecting ``(N, 2)`` lon/lat arrays to ``target_crs``."""
-    from pyproj import Transformer
-
-    transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
-
-    def project(lonlat: FloatArray) -> FloatArray:
-        x, y = transformer.transform(lonlat[:, 0], lonlat[:, 1])
-        return np.column_stack((x, y))
-
-    return project
-
-
 def _in_bbox(lonlat: FloatArray, bbox: tuple[float, float, float, float]) -> bool:
     min_lon, min_lat, max_lon, max_lat = bbox
     inside = (
@@ -241,7 +225,7 @@ def read_ways(
     """
     import osmium
 
-    project = project or lonlat_projector()
+    project = project or make_projector("EPSG:4326", WORK_CRS)
     processor = (
         osmium.FileProcessor(str(path), osmium.osm.NODE | osmium.osm.WAY)
         .with_locations()

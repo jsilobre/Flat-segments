@@ -89,3 +89,8 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
+filterwarnings = [
+    "error",
+    # rasterio still uses the deprecated `Affine * tuple` operator internally.
+    "ignore:Use `@` matmul:PendingDeprecationWarning:rasterio",
+]

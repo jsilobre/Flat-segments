@@ -95,3 +95,9 @@ def test_profiles_round_trip_keeps_nan(tmp_path: Path) -> None:
     assert (back.step_m, back.elevation_source) == (5.0, "x")
     np.testing.assert_array_equal(back.z_raw["s1"], table.z_raw["s1"])
     np.testing.assert_array_equal(back.z_raw["s2"], [4.0])
+
+
+def test_negative_zero_is_normalised() -> None:
+    [segment] = sample_segments()
+    props = ex.segment_properties(replace(segment, grade_mean_pct=-0.001))
+    assert str(props["grade_mean_pct"]) == "0.0"

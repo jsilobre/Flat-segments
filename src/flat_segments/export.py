@@ -93,7 +93,7 @@ def segment_properties(segment: Segment) -> dict[str, Any]:
     for name in PUBLIC_FIELDS:
         value = getattr(segment, name)
         if name in ROUNDING and isinstance(value, float) and math.isfinite(value):
-            value = round(value, ROUNDING[name])
+            value = round(value, ROUNDING[name]) + 0.0  # + 0.0 turns -0.0 into 0.0
         props[name] = _json_value(value.value if name == "kind" else value)
     return props
 

@@ -256,3 +256,99 @@ def download_dem(
         typer.echo(f"Download failed: {error}", err=True)
         raise typer.Exit(1) from error
     typer.echo(f"DEM -> {vrt}")
+
+
+def _detection_params(
+    segments: Path, config: Path | None, overrides: list[str] | None
+) -> PipelineParams:
+    """Parameters used to detect ``segments`` (their sidecar) unless --config is given."""
+    sidecar = steps.params_sidecar(segments)
+    return get_params(config or (sidecar if sidecar.exists() else None), overrides)
+
+
+@app.command()
+def report(
+    segments: SegmentsIn = PATHS.segments,
+    out: Annotated[Path | None, _out("Write the Markdown report here.")] = None,
+) -> None:
+    """Summarise a segments file (counts, lengths, targets, crossings, surfaces)."""
+    from flat_segments.calibration import summarize
+    from flat_segments.export import read_segments
+
+    text = summarize(read_segments(segments))
+    if out is None:
+        typer.echo(text, nl=False)
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        typer.echo(f"report -> {out}")
+
+
+@app.command()
+def sweep(
+    key: Annotated[str, typer.Argument(help="Parameter, e.g. flat.max_local_grade_pct.")],
+    values: Annotated[list[str], typer.Argument(help="Values to try (TOML syntax).")],
+    strokes: StrokesIn = PATHS.strokes,
+    profiles: ProfilesIn = PATHS.profiles,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Rerun detection for several values of one parameter and compare counts."""
+    from flat_segments import calibration
+    from flat_segments.export import read_profiles, read_strokes
+
+    params = get_params(config, overrides)
+    table = read_profiles(profiles)
+    try:
+        rows = calibration.sweep(
+            read_strokes(strokes), table.z_raw, params, key, values, table.elevation_source
+        )
+    except ConfigError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(calibration.format_sweep(key, rows), nl=False)
+
+
+@app.command()
+def inspect(
+    segment_id: Annotated[str, typer.Argument(help="Segment id, e.g. flat-3fa2b1c9d0e4.")],
+    segments: SegmentsIn = PATHS.segments,
+    strokes: StrokesIn = PATHS.strokes,
+    profiles: ProfilesIn = PATHS.profiles,
+    out: Annotated[Path | None, _out("PNG path (default: next to the segments).")] = None,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Plot the elevation and grade profile around one segment (needs matplotlib)."""
+    from flat_segments.calibration import plot_segment
+    from flat_segments.export import read_profiles, read_segments, read_strokes
+    from flat_segments.profile import build_profile
+
+    segment = next((s for s in read_segments(segments) if s.id == segment_id), None)
+    if segment is None:
+        raise typer.BadParameter(f"no segment {segment_id!r} in {segments}")
+    stroke = next(s for s in read_strokes(strokes) if s.id == segment.stroke_id)
+    params = _detection_params(segments, config, overrides)
+    z_raw = read_profiles(profiles).z_raw[stroke.id]
+    profile = build_profile(stroke.coords, z_raw, params.profile, stroke.structures())
+    path = out or segments.parent / "inspect" / f"{segment_id}.png"
+    typer.echo(f"profile -> {plot_segment(segment, stroke, profile, params, path)}")
+
+
+@app.command("validation-sheet")
+def validation_sheet(
+    segments: SegmentsIn = PATHS.segments,
+    count: Annotated[int, typer.Option(help="Number of segments to check.", min=1)] = 20,
+    out: Annotated[Path, _out("Markdown sheet.")] = Path("docs/validation/pilot.md"),
+    site_url: Annotated[str, typer.Option(help="Base URL of the map page.")] = (
+        "https://jsilobre.github.io/Flat-segments/"
+    ),
+) -> None:
+    """Write the field validation sheet (a representative sample of segments)."""
+    from flat_segments import calibration
+    from flat_segments.export import read_segments
+
+    sample = calibration.select_for_validation(read_segments(segments), count)
+    text = calibration.validation_sheet(sample, site_url=site_url, source=str(segments))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    typer.echo(f"{len(sample)} segments -> {out}")

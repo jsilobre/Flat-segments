@@ -21,8 +21,14 @@ dependencies = [
 [project.scripts]
 flat-segments = "flat_segments.cli:app"
 
+[project.optional-dependencies]
+viz = [
+    "matplotlib>=3.8",
+]
+
 [dependency-groups]
 dev = [
+    "matplotlib>=3.8",
     "mypy>=1.10",
     "pre-commit>=3.7",
     "pytest>=8.0",

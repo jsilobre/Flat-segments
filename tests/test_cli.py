@@ -164,3 +164,31 @@ def test_download_failure_is_reported(tmp_path: Path, monkeypatch: pytest.Monkey
     result = runner.invoke(cli.app, ["download-osm", "--out-dir", str(tmp_path)])
     assert result.exit_code == 1
     assert "HTTP 404" in result.output
+
+
+def test_calibration_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pbf, dem = make_inputs(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    pipeline_args = ["pipeline", "--pbf", str(pbf), "--dem", str(dem), "--bbox", BBOX]
+    assert runner.invoke(cli.app, [*pipeline_args, "--out", "site.geojson"]).exit_code == 0
+
+    result = runner.invoke(cli.app, ["report"])
+    assert result.exit_code == 0, result.output
+    assert "| flat | 1 |" in result.output
+
+    result = runner.invoke(cli.app, ["sweep", "flat.max_mean_grade_pct", "0.2", "1"])
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[2].startswith("| 0.2 | 0 |")  # the 0.4 % slope is too steep for 0.2 %
+    assert lines[3].startswith("| 1 | 1 |")
+
+    segment_id = json.loads(Path("site.geojson").read_text())["features"][0]["id"]
+    result = runner.invoke(cli.app, ["inspect", segment_id])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "data" / "processed" / "inspect" / f"{segment_id}.png").exists()
+    assert runner.invoke(cli.app, ["inspect", "flat-unknown"]).exit_code == 2
+
+    result = runner.invoke(cli.app, ["validation-sheet", "--count", "5"])
+    assert result.exit_code == 0, result.output
+    sheet = (tmp_path / "docs" / "validation" / "pilot.md").read_text()
+    assert f"?id={segment_id}" in sheet

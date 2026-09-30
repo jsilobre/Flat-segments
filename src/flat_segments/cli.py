@@ -44,7 +44,10 @@ ProfilesOut = Annotated[Path, _out("Output profiles Parquet.")]
 SegmentsOut = Annotated[Path, _out("Output segments GeoParquet.")]
 GeojsonOut = Annotated[Path, _out("Output GeoJSON (WGS84).")]
 BboxOpt = Annotated[str, typer.Option(help="WGS84 bbox: min_lon,min_lat,max_lon,max_lat.")]
-SourceOpt = Annotated[str, typer.Option(help="Elevation source label.")]
+SourceOpt = Annotated[
+    str | None,
+    typer.Option(help="Elevation source label (default: read from the DEM, else rge_alti_1m)."),
+]
 SampleOpt = Annotated[bool, typer.Option(help="Flag the data as fictitious.")]
 ConfigOpt = Annotated[
     Path | None,
@@ -129,7 +132,7 @@ def elevation(
     dem: DemIn = PATHS.dem,
     strokes: StrokesIn = PATHS.strokes,
     out: ProfilesOut = PATHS.profiles,
-    source: SourceOpt = "rge_alti_1m",
+    source: SourceOpt = None,
     config: ConfigOpt = None,
     overrides: SetOpt = None,
 ) -> None:
@@ -178,7 +181,7 @@ def pipeline(
     dem: DemIn = PATHS.dem,
     bbox: BboxOpt = DEFAULT_BBOX,
     out: GeojsonOut = PATHS.geojson,
-    source: SourceOpt = "rge_alti_1m",
+    source: SourceOpt = None,
     sample: SampleOpt = False,
     config: ConfigOpt = None,
     overrides: SetOpt = None,
@@ -196,7 +199,9 @@ def pipeline(
 
 @app.command("download-osm")
 def download_osm(
-    url: Annotated[str, typer.Option(help="Geofabrik extract URL.")] = GEOFABRIK_URL,
+    url: Annotated[
+        str, typer.Option(help="Extract URL (Geofabrik or a mirror publishing a .md5).")
+    ] = GEOFABRIK_URL,
     out_dir: Annotated[Path, typer.Option(help="Download folder.", file_okay=False)] = Path(
         "data/raw"
     ),
@@ -232,7 +237,7 @@ def download_dem(
     layer: Annotated[str, typer.Option(help="WMS elevation layer.")] = WMS_LAYER,
     force: Annotated[bool, typer.Option(help="Download tiles already on disk.")] = False,
 ) -> None:
-    """Download RGE ALTI tiles over the bbox (WMS) and assemble a VRT."""
+    """Download elevation tiles over the bbox (WMS, LiDAR HD) and assemble a VRT."""
     from flat_segments import download as dl
     from flat_segments.elevation import bbox_to_lambert93
 

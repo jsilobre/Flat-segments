@@ -27,6 +27,11 @@ from flat_segments.params import WORK_CRS, ProfileParams
 #: ``y = d*col + e*row + f`` (same order as ``affine.Affine`` / rasterio).
 Transform = tuple[float, float, float, float, float, float]
 
+#: Raster metadata item recording the elevation source (``lidar_hd``…).
+SOURCE_TAG = "ELEVATION_SOURCE"
+#: Source assumed for a raster without :data:`SOURCE_TAG` (manual RGE ALTI mosaic).
+DEFAULT_SOURCE = "rge_alti_1m"
+
 
 class DemSampler(Protocol):
     """Anything that returns elevations for Lambert-93 points."""
@@ -92,6 +97,15 @@ class FunctionDem:
     def sample(self, xy: FloatArray) -> FloatArray:
         """Evaluate the function at each point."""
         return np.asarray(self.function(xy[:, 0], xy[:, 1]), dtype=np.float64)
+
+
+def raster_source(path: Path) -> str | None:
+    """Elevation source recorded in a raster's metadata, if any."""
+    import rasterio
+
+    with rasterio.open(path) as ds:
+        value = ds.tags().get(SOURCE_TAG)
+    return str(value) if value else None
 
 
 class RasterDem:

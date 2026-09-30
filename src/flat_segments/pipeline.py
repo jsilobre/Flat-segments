@@ -23,7 +23,7 @@ class DataPaths:
     """Default file locations (``data/`` is not versioned)."""
 
     pbf: Path = Path("data/raw/pilot.osm.pbf")
-    dem: Path = Path("data/raw/rge_alti/pilot.vrt")
+    dem: Path = Path("data/raw/dem/pilot.vrt")
     strokes: Path = Path("data/interim/strokes.parquet")
     profiles: Path = Path("data/interim/profiles.parquet")
     segments: Path = Path("data/processed/segments.parquet")
@@ -61,16 +61,21 @@ def run_elevation(
     strokes: Path,
     out: Path,
     params: PipelineParams,
-    source: str = "rge_alti_1m",
+    source: str | None = None,
 ) -> int:
     """Sample the DEM along every stroke.
+
+    ``source`` defaults to the one recorded in the raster (``download-dem``
+    tags its tiles and VRT), else ``rge_alti_1m``.
 
     Returns:
         Number of profiles written.
     """
-    from flat_segments.elevation import RasterDem, sample_stroke
+    from flat_segments.elevation import DEFAULT_SOURCE, RasterDem, raster_source, sample_stroke
     from flat_segments.export import ProfileTable, read_strokes, write_profiles
 
+    if source is None:
+        source = raster_source(dem) or DEFAULT_SOURCE
     all_strokes = read_strokes(strokes)
     with RasterDem(dem) as sampler:
         z_raw = {s.id: sample_stroke(s.coords, sampler, params.profile) for s in all_strokes}
@@ -120,7 +125,7 @@ def run_all(
     bbox: tuple[float, float, float, float] | None,
     params: PipelineParams,
     *,
-    source: str = "rge_alti_1m",
+    source: str | None = None,
     sample: bool = False,
 ) -> list[Segment]:
     """Run the four steps in sequence."""

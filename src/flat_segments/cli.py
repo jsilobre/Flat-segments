@@ -17,6 +17,7 @@ from flat_segments import __version__
 from flat_segments import pipeline as steps
 from flat_segments.config import ConfigError, load_params, params_to_toml
 from flat_segments.detect import Segment, SegmentKind
+from flat_segments.download import GEOFABRIK_URL, WMS_LAYER, WMS_URL
 from flat_segments.params import PILOT_BBOX_WGS84, PipelineParams
 
 PATHS = steps.DataPaths()
@@ -191,3 +192,67 @@ def pipeline(
         raise typer.BadParameter(str(error)) from error
     _report_detection(segments, paths.segments)
     typer.echo(f"GeoJSON -> {out}")
+
+
+@app.command("download-osm")
+def download_osm(
+    url: Annotated[str, typer.Option(help="Geofabrik extract URL.")] = GEOFABRIK_URL,
+    out_dir: Annotated[Path, typer.Option(help="Download folder.", file_okay=False)] = Path(
+        "data/raw"
+    ),
+    clip: Annotated[bool, typer.Option(help="Also write the clipped pilot extract.")] = True,
+    bbox: BboxOpt = DEFAULT_BBOX,
+    clipped: Annotated[Path, _out("Clipped extract (with --clip).")] = PATHS.pbf,
+    force: Annotated[bool, typer.Option(help="Download even if up to date.")] = False,
+) -> None:
+    """Download the OSM extract (MD5-checked), then clip it to the bbox."""
+    from flat_segments import download as dl
+    from flat_segments.osm import clip_osm
+
+    try:
+        path = dl.download_osm(out_dir, url, dl.urlopen, force=force)
+    except dl.DownloadError as error:
+        typer.echo(f"Download failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"OSM extract -> {path}")
+    if clip:
+        n_ways, n_nodes = clip_osm(path, clipped, parse_bbox(bbox))
+        typer.echo(f"{n_ways} ways, {n_nodes} nodes -> {clipped}")
+
+
+@app.command("download-dem")
+def download_dem(
+    bbox: BboxOpt = DEFAULT_BBOX,
+    out_dir: Annotated[
+        Path, typer.Option(help="Output folder.", file_okay=False)
+    ] = PATHS.dem.parent,
+    tile_size_m: Annotated[float, typer.Option(help="Tile size (metres).")] = 2000.0,
+    resolution_m: Annotated[float, typer.Option(help="Pixel size (metres).")] = 1.0,
+    wms_url: Annotated[str, typer.Option(help="WMS endpoint.")] = WMS_URL,
+    layer: Annotated[str, typer.Option(help="WMS elevation layer.")] = WMS_LAYER,
+    force: Annotated[bool, typer.Option(help="Download tiles already on disk.")] = False,
+) -> None:
+    """Download RGE ALTI tiles over the bbox (WMS) and assemble a VRT."""
+    from flat_segments import download as dl
+    from flat_segments.elevation import bbox_to_lambert93
+
+    def progress(index: int, total: int, tile: dl.DemTile) -> None:
+        typer.echo(f"tile {index}/{total} {tile.name}")
+
+    try:
+        vrt = dl.download_dem(
+            bbox_to_lambert93(parse_bbox(bbox)),
+            out_dir,
+            dl.urlopen,
+            tile_size_m=tile_size_m,
+            resolution_m=resolution_m,
+            base_url=wms_url,
+            layer=layer,
+            vrt_name=PATHS.dem.name,
+            force=force,
+            on_tile=progress,
+        )
+    except (dl.DownloadError, ValueError) as error:
+        typer.echo(f"Download failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"DEM -> {vrt}")

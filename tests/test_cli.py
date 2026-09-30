@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,8 +7,10 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from flat_segments import cli
+from flat_segments import cli, download
 from flat_segments.elevation import bbox_to_lambert93
+from flat_segments.osm import read_ways
+from tests.test_download import FakeWeb, fake_wms
 from tests.test_elevation import write_geotiff
 
 runner = CliRunner()
@@ -127,3 +130,37 @@ def test_invalid_override_is_a_usage_error() -> None:
     result = runner.invoke(cli.app, ["config", "--set", "flat.nope=1"])
     assert result.exit_code == 2
     assert "unknown parameter" in result.output
+
+
+def test_download_osm_command_downloads_and_clips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = OSM.encode()
+    url = "https://example.org/area.osm"
+    md5 = hashlib.md5(content, usedforsecurity=False).hexdigest()
+    web = FakeWeb({f"{url}.md5": md5.encode(), url: content})
+    monkeypatch.setattr(download, "urlopen", web)
+    clipped = tmp_path / "pilot.osm.pbf"
+    args = ["--url", url, "--out-dir", str(tmp_path), "--bbox", BBOX, "--clipped", str(clipped)]
+    result = runner.invoke(cli.app, ["download-osm", *args])
+    assert result.exit_code == 0, result.output
+    assert "2 ways" in result.output
+    assert [w.id for w in read_ways(clipped)] == [1, 2]
+
+
+def test_download_dem_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(download, "urlopen", FakeWeb({download.WMS_URL: fake_wms}))
+    args = ["--bbox", "1.530,43.529,1.535,43.531", "--out-dir", str(tmp_path)]
+    result = runner.invoke(
+        cli.app, ["download-dem", *args, "--tile-size-m", "500", "--resolution-m", "10"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "tile 1/" in result.output
+    assert (tmp_path / "pilot.vrt").exists()
+
+
+def test_download_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(download, "urlopen", FakeWeb({}))
+    result = runner.invoke(cli.app, ["download-osm", "--out-dir", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "HTTP 404" in result.output

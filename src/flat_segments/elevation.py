@@ -183,18 +183,3 @@ def bbox_to_lambert93(
         math.ceil(max_x / r) * r,
         math.ceil(max_y / r) * r,
     )
-
-
-def download_rge_alti(bbox: tuple[float, float, float, float], out_dir: Path) -> Path:
-    """Download the RGE ALTI 1 m tiles covering ``bbox`` (not implemented yet).
-
-    Planned for phase 1, see docs/data-sources.md (département archive, or
-    extraction over the bbox from the Géoplateforme services).
-
-    Raises:
-        NotImplementedError: Always, for now.
-    """
-    raise NotImplementedError(
-        "RGE ALTI download is not automated yet: follow docs/data-sources.md, "
-        f"then pass the raster to `flat-segments elevation --dem` (bbox={bbox}, out={out_dir})."
-    )

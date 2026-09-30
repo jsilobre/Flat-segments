@@ -127,3 +127,19 @@ def test_read_ways_without_bbox_keeps_everything_relevant(tmp_path: Path) -> Non
     path = tmp_path / "sample.osm"
     path.write_text(OSM_XML)
     assert [w.id for w in osm.read_ways(path)] == [10, 11, 13]
+
+
+def test_clip_osm_keeps_what_read_ways_needs(tmp_path: Path) -> None:
+    src = tmp_path / "sample.osm"
+    src.write_text(OSM_XML)
+    bbox = (1.5, 43.5, 1.6, 43.6)
+    dst = tmp_path / "clipped.osm.pbf"
+    n_ways, n_nodes = osm.clip_osm(src, dst, bbox)
+    assert (n_ways, n_nodes) == (2, 4)
+    full = osm.read_ways(src, bbox=bbox)
+    clipped = osm.read_ways(dst)
+    assert [w.id for w in clipped] == [w.id for w in full]
+    for a, b in zip(full, clipped, strict=True):
+        assert a.node_ids == b.node_ids
+        np.testing.assert_allclose(a.coords, b.coords)
+    osm.clip_osm(src, dst, bbox)  # overwriting is allowed

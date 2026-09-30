@@ -1,5 +1,5 @@
 # Data (downloaded or generated) — never committed
-data/
+/data/
 
 # Python
 __pycache__/

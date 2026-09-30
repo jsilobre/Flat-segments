@@ -1,8 +1,9 @@
 """Command-line interface of the offline pipeline.
 
-``extract`` -> ``elevation`` -> ``detect`` -> ``export``; each step reads and
-writes files under ``data/`` (see docs/architecture.md, section 3.1).
-Parameters currently use the defaults of :mod:`flat_segments.params`.
+``extract`` -> ``elevation`` -> ``detect`` -> ``export`` (or ``pipeline`` for
+all four); each step reads and writes files under ``data/`` (see
+docs/architecture.md, section 3.1). Parameters come from the defaults, an
+optional ``--config`` TOML file and ``--set key=value`` overrides.
 """
 
 from __future__ import annotations
@@ -13,30 +14,45 @@ from typing import Annotated
 import typer
 
 from flat_segments import __version__
+from flat_segments import pipeline as steps
+from flat_segments.config import ConfigError, load_params, params_to_toml
+from flat_segments.detect import Segment, SegmentKind
 from flat_segments.params import PILOT_BBOX_WGS84, PipelineParams
 
-DEFAULT_PBF = Path("data/raw/midi-pyrenees-latest.osm.pbf")
-DEFAULT_DEM = Path("data/raw/rge_alti/pilot.vrt")
-DEFAULT_STROKES = Path("data/interim/strokes.parquet")
-DEFAULT_PROFILES = Path("data/interim/profiles.parquet")
-DEFAULT_SEGMENTS = Path("data/processed/segments.parquet")
-DEFAULT_GEOJSON = Path("web/data/segments.geojson")
+PATHS = steps.DataPaths()
 DEFAULT_BBOX = ",".join(str(v) for v in PILOT_BBOX_WGS84)
 
-PbfIn = Annotated[
-    Path, typer.Option(help="OSM extract (.osm.pbf or .osm).", exists=True, dir_okay=False)
-]
-DemIn = Annotated[
-    Path, typer.Option(help="DEM raster in Lambert-93 (GeoTIFF, VRT).", exists=True, dir_okay=False)
-]
-StrokesIn = Annotated[Path, typer.Option(help="Strokes GeoParquet.", exists=True, dir_okay=False)]
-ProfilesIn = Annotated[Path, typer.Option(help="Profiles Parquet.", exists=True, dir_okay=False)]
-SegmentsIn = Annotated[Path, typer.Option(help="Segments GeoParquet.", exists=True, dir_okay=False)]
+
+def _in(help_text: str) -> typer.models.OptionInfo:
+    option: typer.models.OptionInfo = typer.Option(help=help_text, exists=True, dir_okay=False)
+    return option
+
+
+def _out(help_text: str) -> typer.models.OptionInfo:
+    option: typer.models.OptionInfo = typer.Option(help=help_text, dir_okay=False)
+    return option
+
+
+PbfIn = Annotated[Path, _in("OSM extract (.osm.pbf or .osm).")]
+DemIn = Annotated[Path, _in("DEM raster in Lambert-93 (GeoTIFF, VRT).")]
+StrokesIn = Annotated[Path, _in("Strokes GeoParquet.")]
+ProfilesIn = Annotated[Path, _in("Profiles Parquet.")]
+SegmentsIn = Annotated[Path, _in("Segments GeoParquet.")]
+StrokesOut = Annotated[Path, _out("Output strokes GeoParquet.")]
+ProfilesOut = Annotated[Path, _out("Output profiles Parquet.")]
+SegmentsOut = Annotated[Path, _out("Output segments GeoParquet.")]
+GeojsonOut = Annotated[Path, _out("Output GeoJSON (WGS84).")]
 BboxOpt = Annotated[str, typer.Option(help="WGS84 bbox: min_lon,min_lat,max_lon,max_lat.")]
-StrokesOut = Annotated[Path, typer.Option(help="Output strokes GeoParquet.", dir_okay=False)]
-ProfilesOut = Annotated[Path, typer.Option(help="Output profiles Parquet.", dir_okay=False)]
-SegmentsOut = Annotated[Path, typer.Option(help="Output segments GeoParquet.", dir_okay=False)]
-GeojsonOut = Annotated[Path, typer.Option(help="Output GeoJSON (WGS84).", dir_okay=False)]
+SourceOpt = Annotated[str, typer.Option(help="Elevation source label.")]
+SampleOpt = Annotated[bool, typer.Option(help="Flag the data as fictitious.")]
+ConfigOpt = Annotated[
+    Path | None,
+    typer.Option("--config", help="TOML parameters file.", exists=True, dir_okay=False),
+]
+SetOpt = Annotated[
+    list[str] | None,
+    typer.Option("--set", help="Parameter override, e.g. flat.max_local_grade_pct=1.5."),
+]
 
 app = typer.Typer(
     help="Offline pipeline: OSM network + DEM -> flat segments and climbs for runners.",
@@ -60,6 +76,18 @@ def parse_bbox(value: str) -> tuple[float, float, float, float]:
     return min_lon, min_lat, max_lon, max_lat
 
 
+def get_params(config: Path | None, overrides: list[str] | None) -> PipelineParams:
+    """Load parameters, reporting configuration errors as CLI errors.
+
+    Raises:
+        typer.BadParameter: On an invalid file or override.
+    """
+    try:
+        return load_params(config, overrides or ())
+    except ConfigError as error:
+        raise typer.BadParameter(str(error)) from error
+
+
 def _version(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -76,72 +104,90 @@ def main(
 
 
 @app.command()
+def config(config: ConfigOpt = None, overrides: SetOpt = None) -> None:
+    """Print the effective parameters as TOML (defaults, --config, --set)."""
+    typer.echo(params_to_toml(get_params(config, overrides)), nl=False)
+
+
+@app.command()
 def extract(
-    pbf: PbfIn = DEFAULT_PBF,
+    pbf: PbfIn = PATHS.pbf,
     bbox: BboxOpt = DEFAULT_BBOX,
-    out: StrokesOut = DEFAULT_STROKES,
+    out: StrokesOut = PATHS.strokes,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
 ) -> None:
     """Read OSM ways and chain them into strokes."""
-    from flat_segments.export import write_strokes
-    from flat_segments.network import build_strokes
-    from flat_segments.osm import read_ways
-
-    ways = read_ways(pbf, parse_bbox(bbox))
-    strokes = build_strokes(ways, PipelineParams().network)
-    write_strokes(strokes, out)
-    typer.echo(f"{len(ways)} ways -> {len(strokes)} strokes -> {out}")
+    params = get_params(config, overrides)
+    n_ways, n_strokes = steps.run_extract(pbf, parse_bbox(bbox), out, params)
+    typer.echo(f"{n_ways} ways -> {n_strokes} strokes -> {out}")
 
 
 @app.command()
 def elevation(
-    dem: DemIn = DEFAULT_DEM,
-    strokes: StrokesIn = DEFAULT_STROKES,
-    out: ProfilesOut = DEFAULT_PROFILES,
-    source: Annotated[str, typer.Option(help="Elevation source label.")] = "rge_alti_1m",
+    dem: DemIn = PATHS.dem,
+    strokes: StrokesIn = PATHS.strokes,
+    out: ProfilesOut = PATHS.profiles,
+    source: SourceOpt = "rge_alti_1m",
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
 ) -> None:
     """Sample the DEM along every stroke."""
-    from flat_segments.elevation import RasterDem, sample_stroke
-    from flat_segments.export import ProfileTable, read_strokes, write_profiles
-
-    params = PipelineParams().profile
-    all_strokes = read_strokes(strokes)
-    with RasterDem(dem) as sampler:
-        z_raw = {s.id: sample_stroke(s.coords, sampler, params) for s in all_strokes}
-    write_profiles(ProfileTable(z_raw, params.step_m, source), out)
-    typer.echo(f"{len(z_raw)} profiles -> {out}")
+    params = get_params(config, overrides)
+    count = steps.run_elevation(dem, strokes, out, params, source)
+    typer.echo(f"{count} profiles -> {out}")
 
 
-@app.command()
-def detect(
-    strokes: StrokesIn = DEFAULT_STROKES,
-    profiles: ProfilesIn = DEFAULT_PROFILES,
-    out: SegmentsOut = DEFAULT_SEGMENTS,
-) -> None:
-    """Detect, score and deduplicate flat segments and climbs."""
-    from flat_segments.detect import SegmentKind, detect_all
-    from flat_segments.export import read_profiles, read_strokes, write_segments
-
-    params = PipelineParams()
-    table = read_profiles(profiles)
-    if table.z_raw and abs(table.step_m - params.profile.step_m) > 1e-9:
-        raise typer.BadParameter(
-            f"profiles sampled every {table.step_m} m, expected {params.profile.step_m} m"
-        )
-    segments = detect_all(read_strokes(strokes), table.z_raw, params, table.elevation_source)
-    write_segments(segments, out)
+def _report_detection(segments: list[Segment], out: Path) -> None:
     n_flat = sum(s.kind is SegmentKind.FLAT for s in segments)
     typer.echo(f"{n_flat} flat segments, {len(segments) - n_flat} climbs -> {out}")
 
 
 @app.command()
+def detect(
+    strokes: StrokesIn = PATHS.strokes,
+    profiles: ProfilesIn = PATHS.profiles,
+    out: SegmentsOut = PATHS.segments,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Detect, score and deduplicate flat segments and climbs."""
+    params = get_params(config, overrides)
+    try:
+        segments = steps.run_detect(strokes, profiles, out, params)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    _report_detection(segments, out)
+
+
+@app.command()
 def export(
-    segments: SegmentsIn = DEFAULT_SEGMENTS,
-    out: GeojsonOut = DEFAULT_GEOJSON,
-    sample: Annotated[bool, typer.Option(help="Flag the data as fictitious.")] = False,
+    segments: SegmentsIn = PATHS.segments,
+    out: GeojsonOut = PATHS.geojson,
+    sample: SampleOpt = False,
 ) -> None:
     """Export segments to GeoJSON for the web page."""
-    from flat_segments.export import read_segments, segments_to_geojson, write_geojson
+    count = steps.run_export(segments, out, sample=sample)
+    typer.echo(f"{count} segments -> {out}")
 
-    all_segments = read_segments(segments)
-    write_geojson(segments_to_geojson(all_segments, sample=sample), out)
-    typer.echo(f"{len(all_segments)} segments -> {out}")
+
+@app.command()
+def pipeline(
+    pbf: PbfIn = PATHS.pbf,
+    dem: DemIn = PATHS.dem,
+    bbox: BboxOpt = DEFAULT_BBOX,
+    out: GeojsonOut = PATHS.geojson,
+    source: SourceOpt = "rge_alti_1m",
+    sample: SampleOpt = False,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Run extract, elevation, detect and export in sequence (default paths)."""
+    params = get_params(config, overrides)
+    paths = steps.DataPaths(pbf=pbf, dem=dem, geojson=out)
+    try:
+        segments = steps.run_all(paths, parse_bbox(bbox), params, source=source, sample=sample)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    _report_detection(segments, paths.segments)
+    typer.echo(f"GeoJSON -> {out}")

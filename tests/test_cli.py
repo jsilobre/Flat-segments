@@ -43,14 +43,7 @@ def test_parse_bbox() -> None:
 
 
 def test_full_pipeline_on_synthetic_files(tmp_path: Path) -> None:
-    pbf = tmp_path / "area.osm"
-    pbf.write_text(OSM)
-    min_x, min_y, max_x, max_y = bbox_to_lambert93(cli.parse_bbox(BBOX), round_to_m=100)
-    cols, rows = int((max_x - min_x) / 5), int((max_y - min_y) / 5)
-    x = min_x + 5 * (np.arange(cols) + 0.5)
-    values = np.tile(150 + 0.004 * (x - min_x), (rows, 1))  # gentle 0.4 % slope
-    dem = tmp_path / "dem.tif"
-    write_geotiff(dem, values, (5.0, 0.0, min_x, 0.0, -5.0, max_y), "EPSG:2154")
+    pbf, dem = make_inputs(tmp_path)
     strokes, profiles = tmp_path / "strokes.parquet", tmp_path / "profiles.parquet"
     segments, geojson = tmp_path / "segments.parquet", tmp_path / "segments.geojson"
 
@@ -86,3 +79,51 @@ def test_version() -> None:
     result = runner.invoke(cli.app, ["--version"])
     assert result.exit_code == 0
     assert result.output.strip() == "0.1.0"
+
+
+def make_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """The synthetic OSM file and a gentle-slope GeoTIFF covering it."""
+    pbf = tmp_path / "area.osm"
+    pbf.write_text(OSM)
+    min_x, min_y, max_x, max_y = bbox_to_lambert93(cli.parse_bbox(BBOX), round_to_m=100)
+    cols, rows = int((max_x - min_x) / 5), int((max_y - min_y) / 5)
+    x = min_x + 5 * (np.arange(cols) + 0.5)
+    values = np.tile(150 + 0.004 * (x - min_x), (rows, 1))
+    dem = tmp_path / "dem.tif"
+    write_geotiff(dem, values, (5.0, 0.0, min_x, 0.0, -5.0, max_y), "EPSG:2154")
+    return pbf, dem
+
+
+def test_pipeline_command_with_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pbf, dem = make_inputs(tmp_path)
+    monkeypatch.chdir(tmp_path)  # default intermediate paths live under ./data
+    out = tmp_path / "site" / "segments.geojson"
+    args = ["pipeline", "--pbf", str(pbf), "--dem", str(dem), "--bbox", BBOX, "--out", str(out)]
+    result = runner.invoke(cli.app, [*args, "--set", "flat.target_lengths_m=[250, 1500]"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "data" / "processed" / "segments.params.toml").exists()
+    collection = json.loads(out.read_text())
+    [feature] = collection["features"]
+    assert feature["properties"]["fits_targets_m"] == [250]
+    recorded = collection["metadata"]["params"]["detection"]["flat"]["target_lengths_m"]
+    assert recorded == [250.0, 1500.0]
+
+
+def test_config_command_prints_effective_parameters(tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["config"])
+    assert result.exit_code == 0
+    default = Path(__file__).resolve().parents[1] / "configs" / "default.toml"
+    assert result.output == default.read_text()
+    custom = tmp_path / "custom.toml"
+    custom.write_text("[detection.flat]\nmax_local_grade_pct = 1.5\n")
+    result = runner.invoke(
+        cli.app, ["config", "--config", str(custom), "--set", "dedup.buffer_m=12"]
+    )
+    assert "max_local_grade_pct = 1.5" in result.output
+    assert "buffer_m = 12.0" in result.output
+
+
+def test_invalid_override_is_a_usage_error() -> None:
+    result = runner.invoke(cli.app, ["config", "--set", "flat.nope=1"])
+    assert result.exit_code == 2
+    assert "unknown parameter" in result.output

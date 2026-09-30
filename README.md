@@ -32,7 +32,8 @@ Le détail des calculs est dans [`docs/algorithm.md`](docs/algorithm.md).
 🚧 **Phase 1 : prototype sur la zone pilote.**
 
 Déjà en place :
-- **Pipeline complet**, testé sur des données synthétiques :
+- **Pipeline complet**, testé sur des données synthétiques puis lancé sur la
+  zone pilote :
   - lecture OSM avec pyosmium et découpe de l'extrait ;
   - échantillonnage du MNT avec rasterio ;
   - détection, score et déduplication ;
@@ -43,11 +44,15 @@ Déjà en place :
   fiche de validation terrain.
 - **Front statique** :
   - liens directs vers un segment ;
-  - déploiement GitHub Pages par workflow ;
-  - pour l'instant, un jeu de segments **fictifs** généré autour de Labège.
+  - déploiement GitHub Pages par workflow.
+- **Segments réels de la zone pilote** (`web/data/segments.geojson`, 2,5 Mo) :
+  - 767 plats (323 km) et 2269 côtes (497 km) ;
+  - tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN ;
+  - seuils calibrés sur ces données
+    ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
 
-Reste à faire : lancer le pipeline sur les vraies données de la zone pilote,
-calibrer les seuils, valider sur le terrain et publier.
+Reste à faire : la validation terrain, avec la fiche
+[`docs/validation/pilot.md`](docs/validation/pilot.md) (20 segments).
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).

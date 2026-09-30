@@ -235,7 +235,7 @@ flowchart TD
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
 | **0 — Squelette** *(terminée)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, front sur données fictives, CI | synthétiques | ce dépôt |
-| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages *(faits)* ; exécution sur les vraies données, calibrage des seuils et validation terrain (Labège / Caraman), publication *(à faire)* | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
+| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages, exécution sur les vraies données, calibrage des seuils, publication *(faits)* ; validation terrain (Labège / Caraman) *(à faire)* | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
 | **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + MNT LiDAR HD (RGE ALTI où il manque) | site statique + PMTiles |
 | **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |
 

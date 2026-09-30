@@ -17,7 +17,7 @@ import math
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +48,9 @@ WMS_FORMAT: Final = "image/x-bil;bits=32"
 # Value of ``elevation_source`` for each known layer (docs/data-model.md).
 LAYER_SOURCES: Final = {WMS_LAYER_LIDAR_HD: "lidar_hd", WMS_LAYER_RGE_ALTI: "rge_alti_wms"}
 DEM_NODATA: Final = -99999.0
+# Some Géoplateforme backends intermittently answer "400 LayerNotDefined" for
+# a layer that exists; the same request succeeds when retried.
+WMS_TRANSIENT_CODES: Final = frozenset({400})
 # The service marks nodata with -9999 (LiDAR HD) or -99999 (RGE ALTI): any
 # value below this threshold is nodata.
 WMS_NODATA_BELOW: Final = -1000.0
@@ -72,20 +75,24 @@ def fetch_bytes(
     opener: Opener = urlopen,
     *,
     retries: int = 3,
+    transient_codes: Collection[int] = (),
     sleep: Callable[[float], Any] = time.sleep,
 ) -> bytes:
     """Read a whole (small) resource, retrying transient network errors.
 
+    HTTP 5xx and ``transient_codes`` are retried, other HTTP errors are not.
+
     Raises:
-        DownloadError: After ``retries`` failed attempts, or on HTTP 4xx.
+        DownloadError: After ``retries`` failed attempts, or on another HTTP error.
     """
     for attempt in range(1, retries + 1):
         try:
             with opener(url) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
-            if error.code < 500 or attempt == retries:
-                raise DownloadError(f"{url}: HTTP {error.code}") from error
+            transient = error.code >= 500 or error.code in transient_codes
+            if not transient or attempt == retries:
+                raise DownloadError(f"{url}: HTTP {error.code} {_error_body(error)}") from error
         except (
             urllib.error.URLError,
             http.client.HTTPException,
@@ -96,6 +103,14 @@ def fetch_bytes(
                 raise DownloadError(f"{url}: {error}") from error
         sleep(2.0**attempt)
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _error_body(error: urllib.error.HTTPError) -> str:
+    """Start of an HTTP error body (a WMS ServiceException, typically)."""
+    try:
+        return error.read(300).decode("utf-8", errors="replace")
+    except Exception:  # diagnostic only: never mask the HTTP error
+        return ""
 
 
 def md5_of(path: Path) -> str:
@@ -360,7 +375,9 @@ def download_dem(
         path = out_dir / "tiles" / tile.name
         if force or not path.exists() or raster_source(path) != source:
             url = wms_getmap_url(tile, base_url=base_url, layer=layer)
-            data = fetch_bytes(url, opener, retries=retries, sleep=sleep)
+            data = fetch_bytes(
+                url, opener, retries=retries, transient_codes=WMS_TRANSIENT_CODES, sleep=sleep
+            )
             write_tile(path, decode_bil(data, tile.width, tile.height), tile, source=source)
         paths.append(path)
         if on_tile is not None:

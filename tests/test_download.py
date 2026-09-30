@@ -73,6 +73,16 @@ def test_fetch_bytes_retries_server_errors_but_not_client_errors() -> None:
         dl.fetch_bytes("https://example.org/missing", web, sleep=no_sleep)
 
 
+def test_fetch_bytes_retries_transient_client_errors() -> None:
+    body = io.BytesIO(b"<ServiceException code='LayerNotDefined'/>")
+    web = FakeWeb({URL: b"ok"})
+    web.failures[URL] = [urllib.error.HTTPError(URL, 400, "Bad Request", {}, body)]  # type: ignore[arg-type]
+    assert dl.fetch_bytes(URL, web, transient_codes={400}, sleep=no_sleep) == b"ok"
+    web.failures[URL] = [urllib.error.HTTPError(URL, 400, "Bad Request", {}, body)]  # type: ignore[arg-type]
+    with pytest.raises(dl.DownloadError, match="HTTP 400"):
+        dl.fetch_bytes(URL, web, sleep=no_sleep)
+
+
 def test_fetch_bytes_retries_dropped_connections() -> None:
     web = FakeWeb({URL: b"ok"})
     web.failures[URL] = [

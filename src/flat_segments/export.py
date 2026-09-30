@@ -105,6 +105,7 @@ def segments_to_geojson(
     sample: bool = False,
     generated_at: datetime | None = None,
     attribution: Sequence[str] = ATTRIBUTION,
+    params: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a GeoJSON FeatureCollection (RFC 7946) with a ``metadata`` member.
 
@@ -114,6 +115,7 @@ def segments_to_geojson(
         sample: Marks the data as fictitious (the web page shows a banner).
         generated_at: Export timestamp (defaults to now, UTC).
         attribution: Attribution lines shown on the map.
+        params: Detection parameters (nested mapping) recorded in the metadata.
     """
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
     generated_at = generated_at or datetime.now(UTC)
@@ -135,6 +137,7 @@ def segments_to_geojson(
             "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "sample": sample,
             "attribution": list(attribution),
+            **({"params": dict(params)} if params is not None else {}),
         },
         "features": features,
     }

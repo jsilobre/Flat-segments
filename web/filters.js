@@ -123,3 +123,40 @@ export function featuresBounds(features) {
   }
   return Number.isFinite(minLon) ? [[minLon, minLat], [maxLon, maxLat]] : null;
 }
+
+/**
+ * Read the page state from a query string: `?id=…`, `?kind=flat|climb`,
+ * `?lat=…&lon=…`. Invalid values are ignored.
+ * @returns {{id: string | null, kind: "flat" | "climb" | null, position: [number, number] | null}}
+ */
+export function parseUrlState(search) {
+  const params = new URLSearchParams(search);
+  const kind = params.get("kind");
+  const lat = Number(params.get("lat"));
+  const lon = Number(params.get("lon"));
+  const hasPosition =
+    params.has("lat") &&
+    params.has("lon") &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lon) <= 180;
+  return {
+    id: params.get("id") || null,
+    kind: kind === "flat" || kind === "climb" ? kind : null,
+    position: hasPosition ? [lon, lat] : null,
+  };
+}
+
+/** Query string for a page state (inverse of parseUrlState; "flat" is the default kind). */
+export function buildUrlSearch({ id = null, kind = null, position = null } = {}) {
+  const params = new URLSearchParams();
+  if (id) params.set("id", id);
+  if (kind && kind !== "flat") params.set("kind", kind);
+  if (position) {
+    params.set("lat", position[1].toFixed(5));
+    params.set("lon", position[0].toFixed(5));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}

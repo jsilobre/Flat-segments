@@ -23,30 +23,29 @@ Tags lus : `highway`, `service`, `area`, `access`, `foot`, `oneway:foot`,
 
 Extrait régional [Geofabrik](https://download.geofabrik.de/europe/france.html).
 Geofabrik découpe la France selon les régions d'avant 2016, d'où
-« Midi-Pyrénées » :
+« Midi-Pyrénées ». Une commande fait tout :
 
 ```bash
-mkdir -p data/raw
-curl -L -o data/raw/midi-pyrenees-latest.osm.pbf \
-  https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf
-curl -L -o data/raw/midi-pyrenees-latest.osm.pbf.md5 \
-  https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf.md5
-(cd data/raw && md5sum -c midi-pyrenees-latest.osm.pbf.md5)
+uv run flat-segments download-osm
 ```
+
+1. Télécharge `midi-pyrenees-latest.osm.pbf` dans `data/raw/` et le vérifie
+   avec son fichier `.md5`. Si une copie identique est déjà là, seul le
+   `.md5` est retéléchargé.
+2. Écrit `data/raw/pilot.osm.pbf` : les voies de l'emprise pilote et leurs
+   nœuds (`osm.clip_osm`). C'est l'équivalent en Python pur de
+   `osmium extract`, en deux passes, le filtrage par identifiant se faisant
+   dans libosmium.
+
+Options utiles : `--url` (autre extrait), `--bbox`, `--no-clip`, `--force`.
 
 - **Format** : PBF (Protocol Buffers), nœuds, ways et relations.
 - **Fraîcheur** : régénéré quotidiennement ; des diffs (`.osc.gz`) sont
   disponibles pour des mises à jour incrémentales (phase 3).
-- **Découpe de la zone pilote** (optionnelle, mais elle accélère les
-  itérations) avec [osmium-tool](https://osmcode.org/osmium-tool/) :
-
-  ```bash
-  osmium extract -b 1.48,43.48,1.80,43.59 \
-    data/raw/midi-pyrenees-latest.osm.pbf -o data/raw/pilot.osm.pbf
-  ```
-
-  Sans osmium-tool, `flat-segments extract --bbox …` filtre lui-même les ways
-  pendant la lecture.
+- **Pourquoi découper** : l'extrait découpé ne pèse que quelques Mo et se relit
+  en quelques secondes, ce qui accélère les itérations de calibrage.
+  `flat-segments extract --bbox …` sait aussi filtrer l'extrait complet pendant
+  la lecture.
 
 ### Lecture
 
@@ -108,7 +107,41 @@ en est incapable : une seule maille couvre 15 % du segment.
 
 Page produit : <https://geoservices.ign.fr/rgealti>. Deux façons de faire :
 
-1. **Référence : archive départementale** (Haute-Garonne, 31), à télécharger
+1. **Automatique : extraction sur l'emprise**, méthode retenue pour le
+   prototype :
+
+   ```bash
+   uv run flat-segments download-dem
+   ```
+
+   La commande découpe l'emprise (convertie en Lambert-93, arrondie au km) en
+   dalles de 2 km au plus. Pour chacune, elle demande l'image d'altitude au
+   service WMS raster de la
+   [Géoplateforme](https://geoservices.ign.fr/services-geoplateforme-diffusion) :
+
+   | Réglage | Valeur |
+   |---|---|
+   | Point d'accès | `https://data.geopf.fr/wms-r/wms` |
+   | Couche | `ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES` |
+   | Format | `image/x-bil;bits=32` (flottants 32 bits bruts) |
+   | Version | WMS 1.3.0, `CRS=EPSG:2154` |
+   | Taille d'une image | 2000 × 2000 pixels au pas de 1 m |
+
+   Chaque dalle est enregistrée en GeoTIFF compressé dans
+   `data/raw/rge_alti/tiles/`. Le téléchargement peut reprendre après une
+   interruption : les dalles déjà présentes sont gardées. Les dalles sont
+   ensuite assemblées dans la mosaïque virtuelle `data/raw/rge_alti/pilot.vrt`,
+   dont les chemins sont relatifs.
+
+   > ⚠️ Le nom de la couche, le format et la taille maximale d'une requête
+   > restent **à vérifier** avec `GetCapabilities` au premier téléchargement
+   > réel. Ils sont réglables par `--layer`, `--wms-url`, `--tile-size-m` et
+   > `--resolution-m`.
+
+   C'est léger à télécharger, mais cela dépend d'un service en ligne et c'est
+   moins reproductible qu'une archive.
+
+2. **Repli manuel : archive départementale** (Haute-Garonne, 31), à télécharger
    depuis la page produit, puis décompresser. On assemble ensuite un VRT GDAL
    limité aux dalles de la zone pilote :
 
@@ -121,18 +154,7 @@ Page produit : <https://geoservices.ign.fr/rgealti>. Deux façons de faire :
    ```
 
    L'emprise est en Lambert-93, arrondie au km, et couvre la zone pilote
-   `1.48,43.48,1.80,43.59`. Elle sera recalculée par
-   `elevation.bbox_to_lambert93` lors de l'implémentation.
-
-2. **Prototype : extraction sur l'emprise** via les services de la
-   [Géoplateforme](https://geoservices.ign.fr/services-geoplateforme-diffusion)
-   (service raster WMS de la couche d'élévation haute résolution, en format
-   brut 32 bits), en tuilant la zone par blocs de 2 km au plus.
-   Nom exact de la couche et limites de requête : à confirmer lors de
-   l'implémentation.
-
-   Plus léger à télécharger, mais cela dépend d'un service en ligne et c'est
-   moins reproductible.
+   `1.48,43.48,1.80,43.59`. C'est ce que calcule `elevation.bbox_to_lambert93`.
 
 Le pipeline ne dépend que d'un raster lisible par rasterio en Lambert-93
 (`.vrt`, GeoTIFF ou COG), quelle que soit la façon dont on l'a obtenu.
@@ -195,9 +217,9 @@ qui incluent arbres et bâtiments.
 | Donnée | Volume | Remarque |
 |---|---|---|
 | PBF Midi-Pyrénées | quelques centaines de Mo (ordre de grandeur) | `data/raw/` |
-| PBF zone pilote (découpé) | quelques Mo | optionnel |
+| PBF zone pilote (découpé) | quelques Mo | `data/raw/pilot.osm.pbf` |
 | RGE ALTI 1 m, département 31 | plusieurs Go compressés (ordre de grandeur) | `data/raw/rge_alti/` |
-| MNT zone pilote | ≈ 28 km × 13 km ≈ 364 dalles ≈ 1,5 Go en float32 non compressé ; quelques centaines de Mo en GeoTIFF compressé | VRT : pas de copie |
+| MNT zone pilote | ≈ 28 km × 13 km ≈ 1,5 Go en float32 non compressé (98 dalles WMS de 2 km, ou 364 dalles départementales de 1 km) ; quelques centaines de Mo en GeoTIFF compressé | `data/raw/rge_alti/` ; le VRT ne recopie rien |
 | `strokes.parquet` / `profiles.parquet` (pilote) | quelques Mo à quelques dizaines de Mo | `data/interim/` |
 | `segments.geojson` (pilote) | quelques Mo au plus | `web/data/` ; PMTiles au-delà de ~ 10 Mo |
 

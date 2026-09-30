@@ -29,18 +29,25 @@ Le détail des calculs est dans [`docs/algorithm.md`](docs/algorithm.md).
 
 ## Statut
 
-🚧 **Phase 0 : documents d'architecture et squelette de code.**
+🚧 **Phase 1 : prototype sur la zone pilote.**
 
-- La logique pure (géométrie, chaînage du réseau, profils d'altitude, fenêtre
-  glissante, déduplication, score) est implémentée et testée sur des données
-  synthétiques.
-- Les entrées/sorties (lecture OSM avec pyosmium, lecture raster avec rasterio,
-  GeoParquet, GeoJSON) sont implémentées. Elles sont testées sur de petits
-  fichiers synthétiques, mais pas encore sur les vraies données.
-- Le téléchargement des données n'est pas automatisé : c'est un *stub*
-  documenté (voir [`docs/data-sources.md`](docs/data-sources.md)).
-- Le front `web/` fonctionne sur un jeu de segments **fictifs**, produit par le
-  vrai pipeline à partir d'un réseau synthétique autour de Labège.
+Déjà en place :
+- **Pipeline complet**, testé sur des données synthétiques :
+  - lecture OSM avec pyosmium et découpe de l'extrait ;
+  - échantillonnage du MNT avec rasterio ;
+  - détection, score et déduplication ;
+  - export GeoParquet et GeoJSON.
+- **Téléchargements automatisés** : extrait Geofabrik et dalles RGE ALTI via la
+  Géoplateforme.
+- **Outils de calibrage** : rapport, balayage de paramètres, profil d'un segment,
+  fiche de validation terrain.
+- **Front statique** :
+  - liens directs vers un segment ;
+  - déploiement GitHub Pages par workflow ;
+  - pour l'instant, un jeu de segments **fictifs** généré autour de Labège.
+
+Reste à faire : lancer le pipeline sur les vraies données de la zone pilote,
+calibrer les seuils, valider sur le terrain et publier.
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
@@ -65,17 +72,39 @@ uv run pytest
 uv run flat-segments --help
 ```
 
-### Pipeline (cible)
+### Pipeline
 
-Les données brutes vont dans `data/` (ignoré par Git).
-Voir [`docs/data-sources.md`](docs/data-sources.md) pour les téléchargements.
+Les données brutes et intermédiaires vont dans `data/` (ignoré par Git). Voir
+[`docs/data-sources.md`](docs/data-sources.md) pour le détail des sources.
 
 ```bash
-uv run flat-segments extract   --pbf data/raw/midi-pyrenees-latest.osm.pbf  # → data/interim/strokes.parquet
-uv run flat-segments elevation --dem data/raw/rge_alti/pilot.vrt             # → data/interim/profiles.parquet
-uv run flat-segments detect                                                  # → data/processed/segments.parquet
-uv run flat-segments export                                                  # → web/data/segments.geojson
+uv run flat-segments download-osm   # extrait Geofabrik (MD5) + découpe → data/raw/pilot.osm.pbf
+uv run flat-segments download-dem   # dalles RGE ALTI de l'emprise → data/raw/rge_alti/pilot.vrt
+uv run flat-segments pipeline       # extract + elevation + detect + export → web/data/segments.geojson
 ```
+
+Chaque étape existe aussi séparément : `extract`, `elevation`, `detect` et
+`export`. Toutes acceptent un fichier de paramètres et des surcharges ponctuelles :
+
+```bash
+uv run flat-segments config > mes-parametres.toml          # paramètres effectifs (TOML)
+uv run flat-segments detect --config mes-parametres.toml --set flat.max_local_grade_pct=1.5
+```
+
+Les valeurs par défaut sont dans [`configs/default.toml`](configs/default.toml).
+Elles sont documentées dans [`docs/algorithm.md`](docs/algorithm.md#13-récapitulatif-des-paramètres).
+
+### Calibrage
+
+```bash
+uv run flat-segments report                                   # résumé des segments détectés
+uv run flat-segments sweep flat.max_local_grade_pct 1 1.5 2   # sensibilité à un paramètre
+uv run flat-segments inspect flat-3fa2b1c9d0e4                # profil d'un segment (PNG, matplotlib)
+uv run flat-segments validation-sheet --count 20              # fiche terrain → docs/validation/pilot.md
+```
+
+`inspect` utilise matplotlib : il est installé par `uv sync` (outils de
+développement) ou avec l'extra `viz` (`uv sync --extra viz`).
 
 ### Front
 
@@ -89,6 +118,11 @@ python -m http.server --directory web 8000
 La page charge `web/data/segments.geojson` s'il existe, sinon le jeu d'exemple
 `web/data/sample-segments.geojson` (données fictives, signalées par un bandeau).
 
+Liens directs : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
+position et `?kind=climb` affiche les côtes. Le workflow *Pages* publie `web/` à
+chaque modification sur `main`. Il faut d'abord activer GitHub Pages dans
+*Settings → Pages → Source : GitHub Actions*.
+
 Régénérer le jeu d'exemple : `uv run python scripts/make_sample_data.py`.
 
 Tests du filtrage côté navigateur : `cd web && node --test`.
@@ -96,7 +130,8 @@ Tests du filtrage côté navigateur : `cd web && node --test`.
 ## Organisation du dépôt
 
 ```
-docs/                 documentation (architecture, algorithme, données, ADR)
+docs/                 documentation (architecture, algorithme, données, ADR, validation)
+configs/              paramètres par défaut (TOML)
 src/flat_segments/    pipeline Python (package)
 tests/                tests pytest (profils et réseaux synthétiques)
 scripts/              scripts utilitaires (jeu d'exemple)

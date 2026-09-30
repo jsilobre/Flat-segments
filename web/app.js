@@ -3,10 +3,12 @@
 import * as maplibregl from "maplibre-gl";
 
 import {
+  buildUrlSearch,
   DEFAULT_CRITERIA,
   featuresBounds,
   filterSegments,
   parseLatLon,
+  parseUrlState,
   sortResults,
 } from "./filters.js";
 
@@ -92,11 +94,13 @@ function popupHtml(properties, distanceM) {
     .slice(0, 5)
     .map((id) => `<a href="https://www.openstreetmap.org/way/${id}" target="_blank" rel="noopener">${id}</a>`)
     .join(", ");
+  const link = buildUrlSearch({ id: p.id }) || "?";
   return `<div class="popup">
     <h3>${escapeHtml(titleOf(p))}</h3>
     <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>
     ${flags.length ? `<p class="flags">⚠ ${escapeHtml(flags.join(" ; "))}</p>` : ""}
     ${p.elevation_source !== "synthetic" && osmLinks ? `<p class="hint">Voies OSM : ${osmLinks}</p>` : ""}
+    <p class="hint"><a href="${escapeHtml(link)}">Lien direct vers ce segment</a></p>
   </div>`;
 }
 
@@ -200,11 +204,32 @@ function applyFilters() {
 }
 
 function clearSelection() {
-  if (state.selectedId !== null && map.getSource("segments")) {
-    map.setFeatureState({ source: "segments", id: state.selectedId }, { selected: false });
+  const id = state.selectedId;
+  state.selectedId = null; // before popup.remove(), which fires "close"
+  if (id !== null && map.getSource("segments")) {
+    map.setFeatureState({ source: "segments", id }, { selected: false });
   }
-  state.selectedId = null;
   popup.remove();
+  updateUrl();
+}
+
+popup.on("close", () => {
+  if (state.selectedId !== null) clearSelection();
+});
+
+function updateUrl() {
+  const search = buildUrlSearch({
+    id: state.selectedId,
+    kind: state.criteria.kind,
+    position: state.position,
+  });
+  history.replaceState(null, "", search || location.pathname);
+}
+
+/** Run `callback` once our map layers exist (the style may still be loading). */
+function whenLayersReady(callback) {
+  if (map.getSource("segments")) callback();
+  else map.once("style.load", callback); // registered after addDataLayers, so runs after it
 }
 
 function render() {
@@ -265,6 +290,21 @@ function selectSegment(id, lngLat = null) {
   const anchor = lngLat ?? coords[Math.floor(coords.length / 2)];
   if (!lngLat) map.fitBounds(featuresBounds([result.feature]), { padding: 80, maxZoom: 16 });
   popup.setLngLat(anchor).setHTML(popupHtml(result.feature.properties, result.distanceM)).addTo(map);
+  updateUrl();
+}
+
+/** Show a segment from a link, even if the current filters hide it. */
+function focusSegment(id) {
+  const feature = state.features.find((f) => f.properties.id === id);
+  if (!feature) {
+    $("position-status").textContent = `Segment introuvable : ${id}.`;
+    return;
+  }
+  $(`kind-${feature.properties.kind}`).checked = true;
+  $("min-length").value = "100";
+  readControls();
+  applyFilters();
+  whenLayersReady(() => selectSegment(id));
 }
 
 function setPosition(position, label) {
@@ -272,6 +312,7 @@ function setPosition(position, label) {
   const [lon, lat] = position;
   $("position-status").textContent = `Position : ${lat.toFixed(5)}, ${lon.toFixed(5)} (${label}).`;
   applyFilters();
+  updateUrl();
 }
 
 // --- controls -----------------------------------------------------------------
@@ -302,6 +343,7 @@ function readControls() {
 function onControlsChange() {
   readControls();
   applyFilters();
+  updateUrl();
 }
 
 for (const element of document.querySelectorAll(".panel input, .panel select")) {
@@ -357,8 +399,13 @@ async function loadData() {
   addAttribution(metadata.attribution ?? []);
   state.features = collection.features;
   const bounds = featuresBounds(state.features);
-  if (bounds) map.fitBounds(bounds, { padding: 40, duration: 0 });
+  if (bounds && !initial.position && !initial.id) map.fitBounds(bounds, { padding: 40, duration: 0 });
   applyFilters();
+  if (initial.position) {
+    setPosition(initial.position, "lien");
+    if (!initial.id) map.jumpTo({ center: initial.position, zoom: 14 });
+  }
+  if (initial.id) focusSegment(initial.id);
 }
 
 function addAttribution(dataAttribution) {
@@ -367,6 +414,8 @@ function addAttribution(dataAttribution) {
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: custom }));
 }
 
+const initial = parseUrlState(location.search);
+if (initial.kind) $(`kind-${initial.kind}`).checked = true;
 readControls();
 loadData().catch((error) => {
   console.error(error);

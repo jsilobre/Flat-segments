@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  buildUrlSearch,
   DEFAULT_CRITERIA,
   distanceToLineMeters,
   featuresBounds,
@@ -10,6 +11,7 @@ import {
   haversineMeters,
   matches,
   parseLatLon,
+  parseUrlState,
   sortResults,
 } from "../filters.js";
 
@@ -107,4 +109,15 @@ test("the sample dataset matches the expected schema", () => {
   }
   const kinds = new Set(collection.features.map((f) => f.properties.kind));
   assert.deepEqual([...kinds].sort(), ["climb", "flat"]);
+});
+
+test("URL state: parse and build are inverse, invalid values ignored", () => {
+  const state = { id: "flat-3fa2b1c9d0e4", kind: "climb", position: [1.53321, 43.53081] };
+  const search = buildUrlSearch(state);
+  assert.equal(search, "?id=flat-3fa2b1c9d0e4&kind=climb&lat=43.53081&lon=1.53321");
+  assert.deepEqual(parseUrlState(search), state);
+  assert.equal(buildUrlSearch({ kind: "flat" }), "");
+  assert.deepEqual(parseUrlState("?kind=hill&lat=95&lon=1"), { id: null, kind: null, position: null });
+  assert.deepEqual(parseUrlState("?lat=43.5"), { id: null, kind: null, position: null });
+  assert.deepEqual(parseUrlState(""), { id: null, kind: null, position: null });
 });

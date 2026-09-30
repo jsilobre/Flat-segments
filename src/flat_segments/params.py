@@ -19,6 +19,16 @@ WORK_CRS = "EPSG:2154"
 WEB_CRS = "EPSG:4326"
 
 
+def _check(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
+def _check_targets(group: str, targets: tuple[float, ...]) -> None:
+    _check(len(targets) > 0, f"{group}.target_lengths_m must not be empty")
+    _check(all(t > 0 for t in targets), f"{group}.target_lengths_m must be positive")
+
+
 @dataclass(frozen=True, slots=True)
 class NetworkParams:
     """Parameters for chaining OSM ways into strokes (algorithm.md section 2).
@@ -32,6 +42,12 @@ class NetworkParams:
 
     max_deflection_deg: float = 35.0
     bearing_probe_m: float = 15.0
+
+    def __post_init__(self) -> None:
+        _check(
+            0 <= self.max_deflection_deg <= 180, "network.max_deflection_deg must be in [0, 180]"
+        )
+        _check(self.bearing_probe_m > 0, "network.bearing_probe_m must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +76,19 @@ class ProfileParams:
     gaussian_sigma_m: float = 10.0
     grade_base_m: float = 20.0
     gain_hysteresis_m: float = 0.5
+
+    def __post_init__(self) -> None:
+        for name in ("step_m", "grade_base_m"):
+            _check(getattr(self, name) > 0, f"profile.{name} must be positive")
+        for name in (
+            "lateral_offset_m",
+            "structure_margin_m",
+            "max_gap_fill_m",
+            "median_window_m",
+            "gaussian_sigma_m",
+            "gain_hysteresis_m",
+        ):
+            _check(getattr(self, name) >= 0, f"profile.{name} must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +133,12 @@ class FlatParams:
     max_sinuosity: float = 1.2
     weights: FlatScoreWeights = field(default_factory=FlatScoreWeights)
 
+    def __post_init__(self) -> None:
+        _check_targets("flat", self.target_lengths_m)
+        _check(self.max_mean_grade_pct > 0, "flat.max_mean_grade_pct must be positive")
+        _check(self.max_local_grade_pct > 0, "flat.max_local_grade_pct must be positive")
+        _check(self.max_sinuosity > 1, "flat.max_sinuosity must be greater than 1")
+
 
 @dataclass(frozen=True, slots=True)
 class ClimbParams:
@@ -127,6 +162,15 @@ class ClimbParams:
     max_sinuosity: float = 1.5
     weights: ClimbScoreWeights = field(default_factory=ClimbScoreWeights)
 
+    def __post_init__(self) -> None:
+        _check_targets("climb", self.target_lengths_m)
+        _check(
+            0 < self.min_mean_grade_pct <= self.max_mean_grade_pct,
+            "climb grades must satisfy 0 < min_mean_grade_pct <= max_mean_grade_pct",
+        )
+        _check(self.max_flat_stretch_m >= 0, "climb.max_flat_stretch_m must not be negative")
+        _check(self.max_sinuosity > 1, "climb.max_sinuosity must be greater than 1")
+
 
 @dataclass(frozen=True, slots=True)
 class DedupParams:
@@ -140,6 +184,10 @@ class DedupParams:
     buffer_m: float = 10.0
     max_overlap: float = 0.5
 
+    def __post_init__(self) -> None:
+        _check(self.buffer_m >= 0, "dedup.buffer_m must not be negative")
+        _check(0 <= self.max_overlap <= 1, "dedup.max_overlap must be in [0, 1]")
+
 
 @dataclass(frozen=True, slots=True)
 class DetectionParams:
@@ -149,6 +197,9 @@ class DetectionParams:
     flat: FlatParams = field(default_factory=FlatParams)
     climb: ClimbParams = field(default_factory=ClimbParams)
     dedup: DedupParams = field(default_factory=DedupParams)
+
+    def __post_init__(self) -> None:
+        _check(self.window_step_m > 0, "detection.window_step_m must be positive")
 
 
 @dataclass(frozen=True, slots=True)

@@ -95,8 +95,3 @@ def test_raster_dem_requires_lambert93(tmp_path: Path) -> None:
 
 def test_bbox_to_lambert93_covers_the_pilot_area() -> None:
     assert el.bbox_to_lambert93(PILOT_BBOX_WGS84) == (576000, 6265000, 604000, 6278000)
-
-
-def test_download_is_not_automated_yet(tmp_path: Path) -> None:
-    with pytest.raises(NotImplementedError, match="data-sources"):
-        el.download_rge_alti(PILOT_BBOX_WGS84, tmp_path)

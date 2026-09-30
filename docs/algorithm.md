@@ -376,6 +376,15 @@ export, on ajoute un suffixe `-2`, `-3`… par score décroissant.
 Le pipeline utilise des seuils **permissifs** (rappel élevé) ; c'est au front
 de filtrer plus strictement.
 
+Toutes ces valeurs, ainsi que les poids du score (§ 10), sont réglables sans
+toucher au code :
+- par un fichier TOML (`--config`, modèle dans
+  [`configs/default.toml`](../configs/default.toml)) ;
+- par des surcharges `--set flat.max_local_grade_pct=1.5`.
+
+`flat-segments sweep` compare les résultats de plusieurs valeurs d'un
+paramètre.
+
 ## 14. Coût et limites connues
 
 - **Coût** : linéaire en longueur de réseau. Pour la zone pilote (quelques

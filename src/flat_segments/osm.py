@@ -7,9 +7,9 @@ returns :class:`~flat_segments.network.Way` objects projected to Lambert-93.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 
@@ -207,6 +207,48 @@ def _in_bbox(lonlat: FloatArray, bbox: tuple[float, float, float, float]) -> boo
     return bool(inside.any())
 
 
+class RawWay(NamedTuple):
+    """A relevant OSM way as read from the file (WGS84)."""
+
+    id: int
+    node_ids: tuple[int, ...]
+    lonlat: FloatArray
+    tags: dict[str, str]
+
+
+def iter_relevant_ways(
+    path: Path, bbox: tuple[float, float, float, float] | None = None
+) -> Iterator[RawWay]:
+    """Stream the ``highway=*`` ways kept by :func:`classify_way`.
+
+    Args:
+        path: ``.osm.pbf`` or ``.osm`` file.
+        bbox: WGS84 ``(min_lon, min_lat, max_lon, max_lat)``; ways with at
+            least one node inside are kept whole.
+    """
+    import osmium
+
+    processor = (
+        osmium.FileProcessor(str(path), osmium.osm.NODE | osmium.osm.WAY)
+        .with_locations()
+        .with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))
+        .with_filter(osmium.filter.KeyFilter("highway"))
+    )
+    for obj in processor:
+        if not isinstance(obj, osmium.osm.Way):
+            continue
+        tags = {key: obj.tags[key] for key in USED_TAGS if key in obj.tags}
+        if classify_way(tags) is None:
+            continue
+        nodes = [n for n in obj.nodes if n.location.valid()]
+        if len(nodes) < 2:
+            continue
+        lonlat = np.array([(n.location.lon, n.location.lat) for n in nodes], dtype=np.float64)
+        if bbox is not None and not _in_bbox(lonlat, bbox):
+            continue
+        yield RawWay(obj.id, tuple(n.ref for n in nodes), lonlat, tags)
+
+
 def read_ways(
     path: Path,
     bbox: tuple[float, float, float, float] | None = None,
@@ -223,29 +265,43 @@ def read_ways(
     Returns:
         Ways in file order, including MAJOR roads (used as barriers).
     """
-    import osmium
-
     project = project or make_projector("EPSG:4326", WORK_CRS)
-    processor = (
-        osmium.FileProcessor(str(path), osmium.osm.NODE | osmium.osm.WAY)
-        .with_locations()
-        .with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))
-        .with_filter(osmium.filter.KeyFilter("highway"))
-    )
     ways: list[Way] = []
-    for obj in processor:
-        if not isinstance(obj, osmium.osm.Way):
-            continue
-        tags = {key: obj.tags[key] for key in USED_TAGS if key in obj.tags}
-        if classify_way(tags) is None:
-            continue
-        nodes = [n for n in obj.nodes if n.location.valid()]
-        if len(nodes) < 2:
-            continue
-        lonlat = np.array([(n.location.lon, n.location.lat) for n in nodes], dtype=np.float64)
-        if bbox is not None and not _in_bbox(lonlat, bbox):
-            continue
-        way = way_from_osm(obj.id, tuple(n.ref for n in nodes), project(lonlat), tags)
+    for raw in iter_relevant_ways(path, bbox):
+        way = way_from_osm(raw.id, raw.node_ids, project(raw.lonlat), raw.tags)
         if way is not None:
             ways.append(way)
     return ways
+
+
+def clip_osm(src: Path, dst: Path, bbox: tuple[float, float, float, float]) -> tuple[int, int]:
+    """Write the relevant ways touching ``bbox``, and their nodes, to a new file.
+
+    A pure-Python alternative to ``osmium extract``: two passes over ``src``,
+    the second one filtering by id inside libosmium. Reading the small output
+    gives the same ways as reading ``src`` with the same bbox.
+
+    Returns:
+        ``(number of ways, number of nodes)`` written.
+    """
+    import osmium
+
+    way_ids: set[int] = set()
+    node_ids: set[int] = set()
+    for raw in iter_relevant_ways(src, bbox):
+        way_ids.add(raw.id)
+        node_ids.update(raw.node_ids)
+    node_filter = osmium.filter.IdFilter(node_ids)
+    node_filter.enable_for(osmium.osm.NODE)
+    way_filter = osmium.filter.IdFilter(way_ids)
+    way_filter.enable_for(osmium.osm.WAY)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with osmium.SimpleWriter(str(dst), overwrite=True) as writer:
+        osmium.apply(
+            str(src),
+            osmium.filter.EntityFilter(osmium.osm.NODE | osmium.osm.WAY),
+            node_filter,
+            way_filter,
+            writer,
+        )
+    return len(way_ids), len(node_ids)

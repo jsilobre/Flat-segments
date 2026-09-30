@@ -113,11 +113,13 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
 ### 3.3 Front statique (`web/`)
 
 - `index.html`, `style.css` : une page, sans framework ni étape de build.
-- `app.js` : carte MapLibre GL JS (chargée depuis un CDN, version figée), fond
-  vectoriel OpenFreeMap, couche des segments, panneau de filtres, liste des
-  résultats, géolocalisation.
+- `app.js` : carte MapLibre GL JS (module ES chargé depuis un CDN par une
+  *import map*, version figée et empreintes SRI), fond vectoriel OpenFreeMap
+  avec repli sur un fond uni, couche des segments, panneau de filtres, liste
+  des résultats, géolocalisation.
 - `filters.js` : module ES **pur** (distance haversine, distance point-ligne,
-  filtrage, tri), testé avec `node --test`.
+  filtrage, tri), testé avec `node --test` (`web/tests/`, `web/package.json`
+  ne sert qu'aux tests).
 - `data/segments.geojson` : segments réels quand ils existent ;
   `data/sample-segments.geojson` sinon (données fictives).
 
@@ -198,7 +200,7 @@ flowchart TD
 
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
-| **0 — Squelette** *(en cours)* | Documents d'architecture, logique pure testée, stubs d'E/S, front sur données fictives, CI | synthétiques | ce dépôt |
+| **0 — Squelette** *(en cours)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, téléchargements non automatisés (stubs), front sur données fictives, CI | synthétiques | ce dépôt |
 | **1 — Prototype pilote** | Implémentation complète de `extract` et `elevation`, calibrage des seuils sur le terrain (Labège / Caraman), publication GitHub Pages | OSM + RGE ALTI de la zone pilote | site statique en ligne |
 | **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + RGE ALTI par département | site statique + PMTiles |
 | **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |

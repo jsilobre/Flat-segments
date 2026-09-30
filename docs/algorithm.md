@@ -282,6 +282,8 @@ sur l'intervalle `[a, b]` du stroke :
   Valeur publiée : `yes` si ≥ 90 % de la longueur est éclairée ; sinon
   `partial` si une partie l'est ; sinon `no` si ≥ 50 % est `no` ; sinon
   `unknown`.
+- **Nom** : valeur `name` majoritaire en longueur, si elle couvre au moins la
+  moitié du segment ; sinon aucun nom.
 - **Ouvrages, flags** : `on_structure` si un tronçon `bridge`/`tunnel` touche
   l'intervalle ; `quality_flags` selon le § 4.
 

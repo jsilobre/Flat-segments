@@ -34,10 +34,13 @@ Le détail des calculs est dans [`docs/algorithm.md`](docs/algorithm.md).
 - La logique pure (géométrie, chaînage du réseau, profils d'altitude, fenêtre
   glissante, déduplication, score) est implémentée et testée sur des données
   synthétiques.
-- Les entrées/sorties lourdes (lecture de l'extrait OSM complet, lecture des
-  dalles RGE ALTI) sont en partie des *stubs* documentés.
-- Le front `web/` fonctionne sur un jeu de segments **fictifs** généré à partir
-  d'un réseau synthétique autour de Labège.
+- Les entrées/sorties (lecture OSM avec pyosmium, lecture raster avec rasterio,
+  GeoParquet, GeoJSON) sont implémentées. Elles sont testées sur de petits
+  fichiers synthétiques, mais pas encore sur les vraies données.
+- Le téléchargement des données n'est pas automatisé : c'est un *stub*
+  documenté (voir [`docs/data-sources.md`](docs/data-sources.md)).
+- Le front `web/` fonctionne sur un jeu de segments **fictifs**, produit par le
+  vrai pipeline à partir d'un réseau synthétique autour de Labège.
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).

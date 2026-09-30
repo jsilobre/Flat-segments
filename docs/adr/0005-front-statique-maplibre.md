@@ -16,7 +16,10 @@ pas de serveur à maintenir si on peut l'éviter.
   hébergeable sur GitHub Pages.
 - Carte **MapLibre GL JS** (version figée, chargée depuis un CDN). Elle est
   vectorielle, performante, et lit nativement les PMTiles via le protocole
-  `pmtiles://` : c'est l'évolution prévue si le volume grossit.
+  `pmtiles://` : c'est l'évolution prévue si le volume grossit. Depuis la
+  version 6, MapLibre n'est distribué qu'en modules ES : on le charge par une
+  *import map* avec empreintes SRI. MapLibre crée lui-même son *worker* à
+  partir du CDN.
 - Fond de carte **OpenFreeMap** (tuiles vectorielles OSM, sans clé). En cas
   d'indisponibilité du fond, la page reste utilisable (segments sur fond neutre).
 - Données : `web/data/segments.geojson` précalculé, filtré dans le navigateur.

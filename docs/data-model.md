@@ -38,12 +38,12 @@ Fichiers : `data/processed/segments.parquet` (GeoParquet) et
 | `elev_loss_m` | `float` | m | Dénivelé négatif cumulé (D-), valeur positive |
 | `grade_mean_pct` | `float` | % | Pente moyenne `(elev_end − elev_start) / length`, signée |
 | `grade_max_pct` | `float` | % | Pente locale maximale en valeur absolue (base 20 m) |
-| `sinuosity` | `float` | — | Longueur / distance à vol d'oiseau entre extrémités (≥ 1) |
+| `sinuosity` | `float` \| `null` | — | Longueur / distance à vol d'oiseau entre extrémités (≥ 1) ; `null` dans le GeoJSON pour une boucle fermée |
 | `n_crossings` | `int` | — | Intersections avec une route circulée (`MINOR`) à l'intérieur du segment |
 | `n_junctions` | `int` | — | Carrefours avec d'autres chemins à l'intérieur du segment |
 | `surface` | `str` | — | Revêtement majoritaire : `paved`, `compacted`, `gravel`, `cobbles`, `unpaved`, `unknown` |
 | `lit` | `str` | — | Éclairage : `yes`, `partial`, `no`, `unknown` |
-| `name` | `str` \| `null` | — | Nom OSM majoritaire (tag `name`) |
+| `name` | `str` \| `null` | — | Nom OSM couvrant au moins la moitié du segment (tag `name`) |
 | `highways` | `list[str]` | — | Valeurs `highway` rencontrées, par longueur décroissante |
 | `osm_way_ids` | `list[int]` | — | Ways OSM traversées, dans l'ordre |
 | `on_structure` | `bool` | — | Passe sur un pont ou dans un tunnel |

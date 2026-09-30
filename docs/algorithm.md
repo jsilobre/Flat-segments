@@ -322,7 +322,7 @@ séparément :
 1. Trier les segments par score décroissant.
 2. Pour chaque candidat A, pris dans cet ordre : A est **écarté** s'il existe
    un segment K déjà retenu tel que la part des points de A (rééchantillonnés
-   tous les `[profile.step_m]`) situés à moins de `[dedup.buffer_m]` = 10 m
+   tous les `[profile.step_m]`) situés à moins de `[dedup.buffer_m]` = 20 m
    de K dépasse `[dedup.max_overlap]` = 50 %. Sinon, A est retenu.
 3. Pré-filtre : on ne compare que les paires dont les boîtes englobantes,
    élargies de `buffer_m`, se recouvrent.
@@ -330,6 +330,15 @@ séparément :
 La mesure est asymétrique : un plat de 2 km sur la rue, dont seuls 300 m
 sont doublés par un trottoir, est conservé même si le trottoir a un meilleur
 score.
+
+**Calibrage de `buffer_m`** (zone pilote, 30/09/2026) :
+
+- Avec 10 m, il restait 58 paires de segments parallèles : piste cyclable et
+  trottoir côte à côte, chemin longeant une rue, etc.
+- Leur écart médian est de 11 m, et 90 % sont à moins de 17 m.
+- Passer à 20 m les retire : 23 plats (−2,9 %) et 33 côtes (−1,4 %). À 25 m,
+  le gain est faible (5 plats de plus) et le risque de fondre deux voies
+  distinctes augmente.
 
 ## 12. Identifiant stable
 
@@ -371,7 +380,7 @@ export, on ajoute un suffixe `-2`, `-3`… par score décroissant.
 | `climb.min_local_grade_pct` | 1 % | Seuil de « replat » |
 | `climb.max_flat_stretch_m` | 20 m | Longueur max d'un replat dans une fenêtre |
 | `climb.max_sinuosity` | 1,5 | Sinuosité max d'une fenêtre |
-| `dedup.buffer_m` | 10 m | Distance de recouvrement |
+| `dedup.buffer_m` | 20 m | Distance de recouvrement |
 | `dedup.max_overlap` | 0,5 | Part de recouvrement au-delà de laquelle un segment est écarté |
 
 Le pipeline utilise des seuils **permissifs** (rappel élevé) ; c'est au front

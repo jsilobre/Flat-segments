@@ -181,7 +181,7 @@ class DedupParams:
         max_overlap: Covered fraction above which a candidate is dropped.
     """
 
-    buffer_m: float = 10.0
+    buffer_m: float = 20.0
     max_overlap: float = 0.5
 
     def __post_init__(self) -> None:

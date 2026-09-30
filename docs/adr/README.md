@@ -1,0 +1,36 @@
+# Décisions d'architecture (ADR)
+
+Chaque décision structurante fait l'objet d'un *Architecture Decision Record*
+court. Pour revenir sur une décision, on ne réécrit pas l'ADR : on en crée un
+nouveau qui la **remplace**, et on passe l'ancien au statut « Remplacée par
+ADR NNNN ». Les corrections mineures (précision, lien) se font sur place.
+
+| N° | Décision | Statut |
+|---|---|---|
+| [0001](0001-pipeline-python-uv.md) | Pipeline hors ligne en Python ≥ 3.12, géré avec uv | Acceptée |
+| [0002](0002-reseau-osm-pyosmium.md) | Réseau issu d'OpenStreetMap (Geofabrik), lu avec pyosmium | Acceptée |
+| [0003](0003-altitude-rge-alti-1m.md) | Altitude : RGE ALTI® 1 m de l'IGN | Acceptée |
+| [0004](0004-stockage-geoparquet.md) | Stockage prototype en GeoParquet, PostGIS plus tard | Acceptée |
+| [0005](0005-front-statique-maplibre.md) | Front statique MapLibre d'abord, API ensuite | Acceptée |
+| [0006](0006-strokes-et-troncons-maximaux.md) | Chaînage par continuité (*strokes*) et tronçons maximaux | Acceptée |
+
+## Gabarit
+
+```markdown
+# NNNN — Titre court
+
+- **Statut** : Proposée | Acceptée | Remplacée par ADR NNNN
+- **Date** : AAAA-MM-JJ
+
+## Contexte
+Le problème, les contraintes, ce qui force à décider.
+
+## Décision
+Ce qu'on fait, en une ou deux phrases affirmatives, puis les précisions.
+
+## Conséquences
+Ce que ça implique, en bien et en moins bien.
+
+## Alternatives considérées
+Les options écartées et pourquoi.
+```

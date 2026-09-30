@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+
+import {
+  DEFAULT_CRITERIA,
+  distanceToLineMeters,
+  featuresBounds,
+  filterSegments,
+  haversineMeters,
+  matches,
+  parseLatLon,
+  sortResults,
+} from "../filters.js";
+
+const near = (actual, expected, tolerance) =>
+  assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} not within ${tolerance} of ${expected}`);
+
+const feature = (properties, coordinates = [[1.53, 43.53], [1.535, 43.53]]) => ({
+  type: "Feature",
+  geometry: { type: "LineString", coordinates },
+  properties: {
+    kind: "flat",
+    length_m: 400,
+    grade_mean_pct: 0.2,
+    grade_max_pct: 0.8,
+    n_crossings: 0,
+    surface: "paved",
+    score: 80,
+    ...properties,
+  },
+});
+
+test("haversine: one degree of latitude is about 111.2 km", () => {
+  near(haversineMeters([1.5, 43], [1.5, 44]), 111_195, 10);
+  assert.equal(haversineMeters([1.5, 43.5], [1.5, 43.5]), 0);
+});
+
+test("distance to a line uses the nearest point, not the vertices", () => {
+  const line = [[1.5, 43.5], [1.52, 43.5]];
+  const above = [1.51, 43.501]; // ~111 m north of the middle of the line
+  near(distanceToLineMeters(above, line), 111.2, 0.5);
+  const beyond = [1.53, 43.5]; // past the east end
+  near(distanceToLineMeters(beyond, line), haversineMeters(beyond, [1.52, 43.5]), 0.5);
+});
+
+test("flat criteria: kind, length, local grade, crossings, surface", () => {
+  const c = { ...DEFAULT_CRITERIA };
+  assert.equal(matches(feature({}).properties, c), true);
+  assert.equal(matches(feature({ kind: "climb" }).properties, c), false);
+  assert.equal(matches(feature({ length_m: 150 }).properties, c), false);
+  assert.equal(matches(feature({ grade_max_pct: 2.5 }).properties, c), false);
+  assert.equal(matches(feature({ n_crossings: 2 }).properties, { ...c, noCrossing: true }), false);
+  assert.equal(matches(feature({ surface: "gravel" }).properties, { ...c, pavedOnly: true }), false);
+});
+
+test("climb criteria use the mean grade range", () => {
+  const c = { ...DEFAULT_CRITERIA, kind: "climb", minLengthM: 100, minMeanGradePct: 5, maxMeanGradePct: 8 };
+  assert.equal(matches(feature({ kind: "climb", grade_mean_pct: 6 }).properties, c), true);
+  assert.equal(matches(feature({ kind: "climb", grade_mean_pct: 4 }).properties, c), false);
+  assert.equal(matches(feature({ kind: "climb", grade_mean_pct: 9 }).properties, c), false);
+});
+
+test("filterSegments applies the distance limit only with a position", () => {
+  const close = feature({ score: 50 });
+  const far = feature({ score: 90 }, [[1.7, 43.6], [1.705, 43.6]]);
+  const c = { ...DEFAULT_CRITERIA, maxDistanceM: 2000 };
+  assert.equal(filterSegments([close, far], c).length, 2);
+  const results = filterSegments([close, far], c, [1.532, 43.531]);
+  assert.deepEqual(results.map((r) => r.feature), [close]);
+  near(results[0].distanceM, 111, 5);
+});
+
+test("sortResults by distance then score, or by score", () => {
+  const a = { feature: feature({ score: 60 }), distanceM: 300 };
+  const b = { feature: feature({ score: 90 }), distanceM: 800 };
+  const c = { feature: feature({ score: 70 }), distanceM: null };
+  assert.deepEqual(sortResults([b, c, a], "distance"), [a, b, c]);
+  assert.deepEqual(sortResults([a, b, c], "score"), [b, c, a]);
+});
+
+test("parseLatLon accepts 'lat, lon' and rejects garbage", () => {
+  assert.deepEqual(parseLatLon("43.531, 1.533"), [1.533, 43.531]);
+  assert.deepEqual(parseLatLon(" 43.531 1.533 "), [1.533, 43.531]);
+  assert.deepEqual(parseLatLon("-12.5;45"), [45, -12.5]);
+  assert.equal(parseLatLon("Labège"), null);
+  assert.equal(parseLatLon("95, 1"), null);
+});
+
+test("featuresBounds", () => {
+  const f = [feature({}, [[1, 2], [3, 4]]), feature({}, [[0, 5], [2, 3]])];
+  assert.deepEqual(featuresBounds(f), [[0, 2], [3, 5]]);
+  assert.equal(featuresBounds([]), null);
+});
+
+test("the sample dataset matches the expected schema", () => {
+  const url = new URL("../data/sample-segments.geojson", import.meta.url);
+  const collection = JSON.parse(readFileSync(url, "utf8"));
+  assert.equal(collection.type, "FeatureCollection");
+  assert.equal(collection.metadata.sample, true);
+  assert.ok(collection.features.length > 0);
+  for (const f of collection.features) {
+    assert.equal(f.geometry.type, "LineString");
+    for (const key of ["id", "kind", "length_m", "grade_mean_pct", "grade_max_pct", "n_crossings", "score"]) {
+      assert.ok(key in f.properties, `missing ${key}`);
+    }
+  }
+  const kinds = new Set(collection.features.map((f) => f.properties.kind));
+  assert.deepEqual([...kinds].sort(), ["climb", "flat"]);
+});

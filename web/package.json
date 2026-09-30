@@ -1,0 +1,9 @@
+{
+  "name": "flat-segments-web",
+  "private": true,
+  "description": "Static web page of flat-segments (no build step). Only used to run the tests.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

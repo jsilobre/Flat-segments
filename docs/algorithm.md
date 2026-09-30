@@ -384,7 +384,10 @@ toucher au code :
 - par des surcharges `--set flat.max_local_grade_pct=1.5`.
 
 `flat-segments sweep` compare les résultats de plusieurs valeurs d'un
-paramètre.
+paramètre. Il relance la détection sur les strokes et les profils déjà
+calculés. Il refuse donc les paramètres appliqués avant la détection :
+`network.*`, `profile.step_m` et `profile.lateral_offset_m`. Pour ceux-là, il
+faut relancer `pipeline` avec `--set`.
 
 ## 14. Coût et limites connues
 

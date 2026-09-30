@@ -21,7 +21,7 @@ from typing import Final
 
 import numpy as np
 
-from flat_segments.config import apply_overrides
+from flat_segments.config import ConfigError, apply_overrides
 from flat_segments.detect import Segment, SegmentKind, detect_all
 from flat_segments.geometry import FloatArray
 from flat_segments.network import EventKind, Stroke
@@ -99,6 +99,11 @@ class SweepRow:
     climb_km: float
 
 
+#: Parameters used before detection (``extract``, ``elevation``): sweeping
+#: them over precomputed strokes and profiles would change nothing.
+UPSTREAM_KEYS: Final = ("network.", "profile.step_m", "profile.lateral_offset_m")
+
+
 def sweep(
     strokes: Sequence[Stroke],
     z_raw: Mapping[str, FloatArray],
@@ -110,8 +115,14 @@ def sweep(
     """Rerun detection with ``key`` set to each of ``values`` (override syntax).
 
     Raises:
-        ConfigError: If ``key`` or a value is invalid.
+        ConfigError: If ``key`` or a value is invalid, or if ``key`` is only
+            used by ``extract`` or ``elevation`` (:data:`UPSTREAM_KEYS`).
     """
+    if key.startswith(UPSTREAM_KEYS):
+        raise ConfigError(
+            f"{key} is applied by `extract` / `elevation`, not by `detect`: "
+            "rerun the pipeline with --set to compare its values"
+        )
     rows = []
     for value in values:
         run_params = apply_overrides(params, [f"{key}={value}"])

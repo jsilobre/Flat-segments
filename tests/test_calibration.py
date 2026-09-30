@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from flat_segments import calibration as cal
+from flat_segments.config import ConfigError
 from flat_segments.detect import Segment, SegmentKind, detect_all
 from flat_segments.geometry import FloatArray
 from flat_segments.network import EventKind, Stroke, StrokeEvent
@@ -52,6 +53,13 @@ def test_sweep_reruns_detection() -> None:
     assert rows[0].n_flat < rows[1].n_flat  # the 0.8 % stroke only passes with 1 %
     table = cal.format_sweep("flat.max_mean_grade_pct", rows)
     assert table.splitlines()[0].startswith("| flat.max_mean_grade_pct |")
+
+
+@pytest.mark.parametrize("key", ["network.max_deflection_deg", "profile.step_m"])
+def test_sweep_rejects_parameters_used_before_detection(key: str) -> None:
+    _, strokes, z = dataset()
+    with pytest.raises(ConfigError, match="extract"):
+        cal.sweep(strokes, z, PARAMS, key, ["1", "2"])
 
 
 def test_select_for_validation_is_representative_and_deterministic() -> None:

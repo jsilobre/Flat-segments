@@ -1,0 +1,267 @@
+"""OpenStreetMap input: tag interpretation and PBF reading.
+
+The tag helpers are pure functions (docs/algorithm.md sections 1 and 9).
+:func:`read_ways` streams a ``.osm.pbf`` (or ``.osm``) file with pyosmium and
+returns :class:`~flat_segments.network.Way` objects projected to Lambert-93.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Final
+
+import numpy as np
+
+from flat_segments.geometry import FloatArray
+from flat_segments.network import RoadClass, Way
+from flat_segments.params import WORK_CRS
+
+MAJOR_HIGHWAYS: Final = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+    }
+)
+MINOR_HIGHWAYS: Final = frozenset(
+    {"residential", "unclassified", "living_street", "service", "road"}
+)
+PATH_HIGHWAYS: Final = frozenset(
+    {"footway", "path", "cycleway", "track", "pedestrian", "bridleway"}
+)
+EXCLUDED_SERVICES: Final = frozenset(
+    {"parking_aisle", "driveway", "drive-through", "emergency_access"}
+)
+NO_FOOT: Final = frozenset({"no", "private", "use_sidepath"})
+NO_ACCESS: Final = frozenset({"private", "no", "agricultural", "forestry", "delivery", "military"})
+FOOT_ALLOWED: Final = frozenset({"yes", "designated", "permissive"})
+
+SURFACE_CATEGORIES: Final[Mapping[str, str]] = {
+    **dict.fromkeys(
+        (
+            "asphalt",
+            "paved",
+            "concrete",
+            "concrete:plates",
+            "concrete:lanes",
+            "paving_stones",
+            "chipseal",
+            "tartan",
+            "rubber",
+            "acrylic",
+        ),
+        "paved",
+    ),
+    **dict.fromkeys(("compacted", "fine_gravel"), "compacted"),
+    **dict.fromkeys(("gravel", "pebblestone"), "gravel"),
+    **dict.fromkeys(("sett", "cobblestone", "unhewn_cobblestone"), "cobbles"),
+    **dict.fromkeys(
+        (
+            "unpaved",
+            "ground",
+            "dirt",
+            "earth",
+            "grass",
+            "mud",
+            "sand",
+            "soil",
+            "woodchips",
+            "grass_paver",
+        ),
+        "unpaved",
+    ),
+}
+TRACKTYPE_CATEGORIES: Final[Mapping[str, str]] = {
+    "grade1": "compacted",
+    "grade2": "gravel",
+    "grade3": "unpaved",
+    "grade4": "unpaved",
+    "grade5": "unpaved",
+}
+LIT_YES: Final = frozenset({"yes", "24/7", "automatic", "sunset-sunrise", "limited", "interval"})
+LIT_NO: Final = frozenset({"no", "disused"})
+
+#: Tags kept when reading OSM (everything the pipeline looks at).
+USED_TAGS: Final = (
+    "highway",
+    "service",
+    "area",
+    "access",
+    "foot",
+    "oneway:foot",
+    "surface",
+    "tracktype",
+    "lit",
+    "bridge",
+    "tunnel",
+    "covered",
+    "layer",
+    "name",
+)
+
+
+def classify_way(tags: Mapping[str, str]) -> RoadClass | None:
+    """Role of a way in the network, or ``None`` if it is ignored.
+
+    MAJOR roads are kept whatever their access tags, since they remain
+    barriers. Support ways (MINOR, PATH) must be runnable both ways.
+    """
+    highway = tags.get("highway")
+    if highway in MAJOR_HIGHWAYS:
+        return RoadClass.MAJOR
+    if highway in MINOR_HIGHWAYS:
+        road_class = RoadClass.MINOR
+    elif highway in PATH_HIGHWAYS:
+        road_class = RoadClass.PATH
+    else:
+        return None
+    foot = tags.get("foot")
+    if (
+        tags.get("area") == "yes"
+        or tags.get("service") in EXCLUDED_SERVICES
+        or foot in NO_FOOT
+        or (tags.get("access") in NO_ACCESS and foot not in FOOT_ALLOWED)
+        or tags.get("oneway:foot") == "yes"
+    ):
+        return None
+    return road_class
+
+
+def structure_of(tags: Mapping[str, str]) -> str | None:
+    """``"bridge"``, ``"tunnel"`` (including ``covered=yes``) or ``None``."""
+    if tags.get("bridge", "no") != "no":
+        return "bridge"
+    if tags.get("tunnel", "no") != "no" or tags.get("covered") == "yes":
+        return "tunnel"
+    return None
+
+
+def surface_category(
+    surface: str | None,
+    tracktype: str | None = None,
+    road_class: RoadClass | None = None,
+) -> str:
+    """Normalised surface: paved, compacted, gravel, cobbles, unpaved or unknown.
+
+    Without a ``surface`` tag, falls back on ``tracktype``, then assumes that
+    MINOR roads are paved.
+    """
+    if surface is not None:
+        return SURFACE_CATEGORIES.get(surface, "unknown")
+    if tracktype is not None and tracktype in TRACKTYPE_CATEGORIES:
+        return TRACKTYPE_CATEGORIES[tracktype]
+    if road_class is RoadClass.MINOR:
+        return "paved"
+    return "unknown"
+
+
+def lit_category(lit: str | None) -> str:
+    """Normalised lighting of a way: yes, no or unknown."""
+    if lit in LIT_YES:
+        return "yes"
+    if lit in LIT_NO:
+        return "no"
+    return "unknown"
+
+
+def way_from_osm(
+    way_id: int,
+    node_ids: tuple[int, ...],
+    coords: FloatArray,
+    tags: Mapping[str, str],
+) -> Way | None:
+    """Build a :class:`Way` from OSM data, or ``None`` if it is ignored."""
+    road_class = classify_way(tags)
+    if road_class is None or len(node_ids) < 2:
+        return None
+    return Way(
+        id=way_id,
+        node_ids=node_ids,
+        coords=coords,
+        road_class=road_class,
+        highway=tags["highway"],
+        surface=tags.get("surface"),
+        tracktype=tags.get("tracktype"),
+        lit=tags.get("lit"),
+        structure=structure_of(tags),
+        name=tags.get("name"),
+    )
+
+
+Projector = Callable[[FloatArray], FloatArray]
+
+
+def lonlat_projector(target_crs: str = WORK_CRS) -> Projector:
+    """Return a function projecting ``(N, 2)`` lon/lat arrays to ``target_crs``."""
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
+
+    def project(lonlat: FloatArray) -> FloatArray:
+        x, y = transformer.transform(lonlat[:, 0], lonlat[:, 1])
+        return np.column_stack((x, y))
+
+    return project
+
+
+def _in_bbox(lonlat: FloatArray, bbox: tuple[float, float, float, float]) -> bool:
+    min_lon, min_lat, max_lon, max_lat = bbox
+    inside = (
+        (lonlat[:, 0] >= min_lon)
+        & (lonlat[:, 0] <= max_lon)
+        & (lonlat[:, 1] >= min_lat)
+        & (lonlat[:, 1] <= max_lat)
+    )
+    return bool(inside.any())
+
+
+def read_ways(
+    path: Path,
+    bbox: tuple[float, float, float, float] | None = None,
+    project: Projector | None = None,
+) -> list[Way]:
+    """Read all relevant ``highway=*`` ways from an OSM file.
+
+    Args:
+        path: ``.osm.pbf`` or ``.osm`` file.
+        bbox: WGS84 ``(min_lon, min_lat, max_lon, max_lat)``; ways with at
+            least one node inside are kept whole.
+        project: Projection of lon/lat arrays; defaults to Lambert-93.
+
+    Returns:
+        Ways in file order, including MAJOR roads (used as barriers).
+    """
+    import osmium
+
+    project = project or lonlat_projector()
+    processor = (
+        osmium.FileProcessor(str(path), osmium.osm.NODE | osmium.osm.WAY)
+        .with_locations()
+        .with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))
+        .with_filter(osmium.filter.KeyFilter("highway"))
+    )
+    ways: list[Way] = []
+    for obj in processor:
+        if not isinstance(obj, osmium.osm.Way):
+            continue
+        tags = {key: obj.tags[key] for key in USED_TAGS if key in obj.tags}
+        if classify_way(tags) is None:
+            continue
+        nodes = [n for n in obj.nodes if n.location.valid()]
+        if len(nodes) < 2:
+            continue
+        lonlat = np.array([(n.location.lon, n.location.lat) for n in nodes], dtype=np.float64)
+        if bbox is not None and not _in_bbox(lonlat, bbox):
+            continue
+        way = way_from_osm(obj.id, tuple(n.ref for n in nodes), project(lonlat), tags)
+        if way is not None:
+            ways.append(way)
+    return ways

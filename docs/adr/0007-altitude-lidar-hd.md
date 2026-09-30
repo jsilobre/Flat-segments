@@ -49,6 +49,18 @@ sondage sur 98, un par dalle de 2 km.
 
 ## Conséquences
 
+- **Effet mesuré sur la zone pilote** (paramètres par défaut, 30/09/2026). Le
+  même réseau a été traité avec les deux MNT :
+
+  | | Plats | Côtes |
+  |---|---|---|
+  | MNT LiDAR HD | 790 (331 km) | 2302 (504 km) |
+  | RGE ALTI par WMS | 762 (321 km) | 2335 (506 km) |
+  | km LiDAR HD retrouvés avec le RGE ALTI (à 10 m près) | 92 % | 97 % |
+
+  Le lissage (σ = 10 m) et le pas de 5 m absorbent l'essentiel de la
+  résolution grossière du RGE ALTI : l'écart porte sur 5 à 8 % des plats,
+  justement ceux dont la pente est proche des seuils.
 - Profils plus précis et homogènes : la précision du LiDAR HD est décimétrique
   partout, alors que le RGE ALTI mêle LiDAR, radar et corrélation d'images.
 - Même projection et même type de raster : aucun changement dans le pipeline

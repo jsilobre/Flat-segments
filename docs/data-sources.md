@@ -6,9 +6,6 @@ le **RGE ALTI®** en repli ([ADR 0007](adr/0007-altitude-lidar-hd.md)). Ce docum
 précise, pour chacune, les formats, le téléchargement, la projection, la
 licence et les volumes.
 
-> ⚠️ Les volumes marqués « ordre de grandeur » sont à confirmer au premier
-> téléchargement, puis à mettre à jour ici.
-
 ## OpenStreetMap
 
 ### Contenu utilisé
@@ -242,12 +239,13 @@ qui incluent arbres et bâtiments.
 
 | Donnée | Volume | Remarque |
 |---|---|---|
-| PBF Midi-Pyrénées | quelques centaines de Mo (ordre de grandeur) | `data/raw/` |
-| PBF zone pilote (découpé) | quelques Mo | `data/raw/pilot.osm.pbf` |
-| RGE ALTI 1 m, département 31 | plusieurs Go compressés (ordre de grandeur) | `data/raw/rge_alti/` |
-| MNT zone pilote | ≈ 28 km × 13 km ≈ 1,5 Go en float32 non compressé (98 dalles WMS de 2 km, ou 364 dalles départementales de 1 km) ; quelques centaines de Mo en GeoTIFF compressé | `data/raw/rge_alti/` ; le VRT ne recopie rien |
-| `strokes.parquet` / `profiles.parquet` (pilote) | quelques Mo à quelques dizaines de Mo | `data/interim/` |
-| `segments.geojson` (pilote) | quelques Mo au plus | `web/data/` ; PMTiles au-delà de ~ 10 Mo |
+| PBF Midi-Pyrénées | 412 Mo (extrait du 29/09/2026) ; environ 10 min de téléchargement | `data/raw/` |
+| PBF zone pilote (découpé) | 1,5 Mo : 13 934 voies `highway=*`, 93 764 nœuds | `data/raw/pilot.osm.pbf` |
+| Archive RGE ALTI 1 m, département 31 | 6,8 Go (GeoTIFF, deux volumes `.7z`) | repli manuel, `data/raw/dem/` |
+| MNT LiDAR HD zone pilote | 28 km × 13 km : 98 dalles WMS de 2 km, 1,5 Go transférés (float32), **681 Mo** en GeoTIFF compressé ; environ 9 min de téléchargement | `data/raw/dem/` ; le VRT ne recopie rien |
+| RGE ALTI par WMS, zone pilote | 109 Mo en GeoTIFF compressé (valeurs en marches d'escalier, très compressibles) | comparaison seulement |
+| `strokes.parquet` / `profiles.parquet` (pilote) | 2,5 Mo / 3,1 Mo : 9145 strokes, 1616 km de voies | `data/interim/` |
+| `segments.geojson` (pilote) | 2,5 Mo pour environ 3000 segments | `web/data/` ; PMTiles au-delà de ~ 10 Mo |
 
 Rien de tout cela n'est versionné (`/data/` est dans `.gitignore`). Seul le jeu
 d'exemple fictif du front l'est.

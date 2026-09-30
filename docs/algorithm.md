@@ -391,9 +391,10 @@ faut relancer `pipeline` avec `--set`.
 
 ## 14. Coût et limites connues
 
-- **Coût** : linéaire en longueur de réseau. Pour la zone pilote (quelques
-  milliers de km de voies), la détection prend quelques secondes à quelques
-  dizaines de secondes. Le poste le plus lourd est la lecture du MNT.
+- **Coût** : linéaire en longueur de réseau. Sur la zone pilote (1616 km de
+  voies, 9145 strokes), le pipeline complet prend environ 30 s, dont une
+  quinzaine pour la détection et la déduplication. Un `sweep` coûte donc
+  environ 15 s par valeur.
 - **Traversées sans nœud commun** : deux voies qui se croisent sans partager
   de nœud sont soit à des niveaux différents (pont, tunnel, `layer`), soit mal
   cartographiées. Elles ne sont pas comptées. Une détection géométrique,

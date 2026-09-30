@@ -248,8 +248,10 @@ réellement plats, traversées correctement comptées).
 - **Tests** : pytest sur des profils et des réseaux synthétiques (pente
   constante, bosse, bruit, zigzag, pont…) ; `node --test` pour le filtrage JS.
 - **Lint et types** : ruff (lint + format), mypy en mode strict.
-- **pre-commit** : ruff, mypy, hygiène des fichiers, refus des gros fichiers
-  (aucune donnée volumineuse dans Git).
+- **pre-commit** : ruff, mypy, hygiène des fichiers, refus des fichiers de plus
+  de 1 Mo (aucune donnée volumineuse dans Git). Seule exception : le jeu publié
+  `web/data/segments.geojson`, plafonné à environ 10 Mo par
+  l'[ADR 0005](adr/0005-front-statique-maplibre.md).
 - **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13), tests JS ;
   déploiement GitHub Pages du front depuis `main`.
 - **Réseau** : les téléchargements passent par une fonction d'ouverture d'URL

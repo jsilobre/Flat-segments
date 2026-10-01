@@ -18,11 +18,15 @@
     <script type="importmap">
       {
         "imports": {
-          "maplibre-gl": "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.mjs"
+          "maplibre-gl": "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.mjs",
+          "pmtiles": "https://unpkg.com/pmtiles@4.5.0/dist/esm/index.js",
+          "fflate": "https://unpkg.com/fflate@0.8.3/esm/browser.js"
         },
         "integrity": {
           "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.mjs": "sha384-KQzExYlfg1SnYNpLaXHTnaCTjr5wmiZ6X3sasvPb94caZfH+3+T1Sl4eJziXUtmN",
-          "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl-shared.mjs": "sha384-V59ofCEPEqpSk5Mswc19DtDYbZWJtne210dFzS328Il6O31eLwTV7v57+Z3NjW/7"
+          "https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl-shared.mjs": "sha384-V59ofCEPEqpSk5Mswc19DtDYbZWJtne210dFzS328Il6O31eLwTV7v57+Z3NjW/7",
+          "https://unpkg.com/pmtiles@4.5.0/dist/esm/index.js": "sha384-Ohx3fvw/UYxrc8vmqvMaO2aAWouBFSe7w9VKOU/siixKmoPu14eYMCPNz+k8CPTW",
+          "https://unpkg.com/fflate@0.8.3/esm/browser.js": "sha384-qEYGUupjunWfiQrMjBBQ8XYX03MQwNxGZJuPkxRr/5vErQwQZwbqaBxk/pjvWAx6"
         }
       }
     </script>
@@ -92,7 +96,7 @@
 
         <label class="field" for="max-distance">
           <span>Distance max <output id="max-distance-value"></output></span>
-          <input id="max-distance" type="range" min="0.5" max="20" step="0.5" value="5" />
+          <input id="max-distance" type="range" min="0.5" max="10" step="0.5" value="5" />
         </label>
 
         <label class="check"><input id="no-crossing" type="checkbox" /> Sans traversée de route</label>

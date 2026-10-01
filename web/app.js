@@ -1,6 +1,8 @@
-// Map page: loads precomputed segments, filters them in the browser (filters.js)
-// and displays them with MapLibre. No build step, no framework.
+// Map page: reads precomputed segments from vector tiles (PMTiles), filters
+// them on the map (MapLibre expressions) and builds the result list from the
+// tiles around the search point (filters.js, tiles.js). No build step.
 import * as maplibregl from "maplibre-gl";
+import { PMTiles, Protocol } from "pmtiles";
 
 import {
   buildUrlSearch,
@@ -8,13 +10,17 @@ import {
   featuresBounds,
   filterSegments,
   isLoop,
+  lineParts,
+  mapFilter,
+  overviewFilter,
   parseLatLon,
   parseUrlState,
   sortResults,
 } from "./filters.js";
+import { decodeTile, indexKey, normalizeProperties, segmentsFromTiles, tilesCoveringCircle } from "./tiles.js";
 
-const DATA_URL = "data/segments.geojson";
-const SAMPLE_URL = "data/sample-segments.geojson";
+// Published tileset, or the fictitious sample when there is none.
+const DATA_DIRS = ["data/", "data/sample/"];
 const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const FALLBACK_STYLE = {
   version: 8,
@@ -24,6 +30,8 @@ const FALLBACK_STYLE = {
 const INITIAL_VIEW = { center: [1.535, 43.53], zoom: 13 };
 const MAX_RESULTS = 50;
 const COLORS = { flat: "#1f6fb2", climb: "#d4570f" };
+// Radius of the tiles read to open a linked segment around its indexed position.
+const LINK_RADIUS_M = 1500;
 
 const SURFACE_LABELS = {
   paved: "revêtu (asphalte, béton…)",
@@ -44,8 +52,12 @@ const FLAG_LABELS = {
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  features: [],
+  metadata: null, // segments.json of the tileset
+  dataDir: null,
+  archive: null, // PMTiles
+  tiles: new Map(), // "z/x/y" -> Promise of a decoded tile (or null)
   results: [],
+  query: 0, // id of the latest result query (older answers are ignored)
   position: null,
   criteria: { ...DEFAULT_CRITERIA },
   sortBy: "distance",
@@ -108,6 +120,9 @@ function popupHtml(properties, distanceM) {
 
 // --- map ----------------------------------------------------------------------
 
+const protocol = new Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+
 const map = new maplibregl.Map({
   container: "map",
   style: BASEMAP_STYLE,
@@ -132,37 +147,12 @@ map.on("error", (event) => {
 });
 
 const popup = new maplibregl.Popup({ maxWidth: "300px" });
+const SEGMENT_LAYERS = ["segments", "overview"];
 
 function addDataLayers() {
   styleReady = true;
-  map.addSource("segments", { type: "geojson", data: emptyCollection(), promoteId: "id" });
   map.addSource("position", { type: "geojson", data: emptyCollection() });
-  const color = ["match", ["get", "kind"], "flat", COLORS.flat, COLORS.climb];
-  const selected = ["boolean", ["feature-state", "selected"], false];
-  // Zoom may only appear at the top level of an interpolate expression.
-  const width = (low, high, factor) => [
-    "interpolate",
-    ["linear"],
-    ["zoom"],
-    11,
-    ["case", selected, low * factor, low],
-    16,
-    ["case", selected, high * factor, high],
-  ];
-  map.addLayer({
-    id: "segments-casing",
-    type: "line",
-    source: "segments",
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#ffffff", "line-width": width(6, 10, 1.6) },
-  });
-  map.addLayer({
-    id: "segments",
-    type: "line",
-    source: "segments",
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": color, "line-width": width(3, 7, 1.8) },
-  });
+  if (state.archive) addSegmentLayers();
   map.addLayer({
     id: "position",
     type: "circle",
@@ -178,33 +168,134 @@ function addDataLayers() {
   render();
 }
 
+/** Segment layers: full detail from zoom 12, a light overview below. */
+function addSegmentLayers() {
+  if (map.getSource("segments")) return;
+  const tiles = state.metadata.tiles;
+  map.addSource("segments", {
+    type: "vector",
+    url: `pmtiles://${state.archive.source.getKey()}`,
+    promoteId: { [tiles.layer]: "id", [tiles.overview_layer]: "id" },
+  });
+  const color = ["match", ["get", "kind"], "flat", COLORS.flat, COLORS.climb];
+  const selected = ["boolean", ["feature-state", "selected"], false];
+  // Zoom may only appear at the top level of an interpolate expression.
+  const width = (low, high, factor) => [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    8,
+    ["case", selected, low * factor * 0.4, low * 0.4],
+    11,
+    ["case", selected, low * factor, low],
+    16,
+    ["case", selected, high * factor, high],
+  ];
+  const before = map.getLayer("position") ? "position" : undefined;
+  const layer = (id, sourceLayer, paint, zooms) =>
+    map.addLayer(
+      {
+        id,
+        type: "line",
+        source: "segments",
+        "source-layer": sourceLayer,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint,
+        ...zooms,
+      },
+      before,
+    );
+  const detail = { minzoom: tiles.minzoom };
+  const overview = { minzoom: tiles.overview_minzoom, maxzoom: tiles.minzoom };
+  layer("overview", tiles.overview_layer, { "line-color": color, "line-width": width(3, 7, 1), "line-opacity": 0.8 }, overview);
+  layer("segments-casing", tiles.layer, { "line-color": "#ffffff", "line-width": width(6, 10, 1.6) }, detail);
+  layer("segments", tiles.layer, { "line-color": color, "line-width": width(3, 7, 1.8) }, detail);
+  updateMapFilters();
+}
+
 map.on("style.load", addDataLayers);
 
 map.on("click", (event) => {
-  const [hit] = map.queryRenderedFeatures(event.point, { layers: ["segments"] });
-  if (hit) {
-    selectSegment(hit.properties.id, event.lngLat);
+  const layers = SEGMENT_LAYERS.filter((id) => map.getLayer(id));
+  const [hit] = layers.length ? map.queryRenderedFeatures(event.point, { layers }) : [];
+  if (hit?.layer.id === "segments") {
+    const feature = { type: "Feature", geometry: hit.geometry, properties: normalizeProperties(hit.properties) };
+    selectSegment(hit.properties.id, event.lngLat, feature);
+  } else if (hit) {
+    // Overview: zoom in where the details (and the popup) are.
+    map.flyTo({ center: event.lngLat, zoom: state.metadata.tiles.minzoom + 1 });
   } else {
     setPosition([event.lngLat.lng, event.lngLat.lat], "point choisi sur la carte");
   }
 });
-map.on("mouseenter", "segments", () => (map.getCanvas().style.cursor = "pointer"));
-map.on("mouseleave", "segments", () => (map.getCanvas().style.cursor = ""));
+for (const id of SEGMENT_LAYERS) {
+  map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
+}
+// Without a position, the results follow the map.
+map.on("moveend", () => {
+  if (!state.position && state.archive) refreshResults();
+});
 
 function emptyCollection() {
   return { type: "FeatureCollection", features: [] };
 }
 
+// --- tiles --------------------------------------------------------------------
+
+/** Decoded segment layer of a tile at the query zoom (cached), or null if empty. */
+function loadTile(z, x, y) {
+  const key = `${z}/${x}/${y}`;
+  if (!state.tiles.has(key)) {
+    const promise = state.archive.getZxy(z, x, y).then((response) => {
+      if (!response) return null;
+      const layer = decodeTile(new Uint8Array(response.data))[state.metadata.tiles.layer];
+      return layer ? { z, x, y, layer } : null;
+    });
+    state.tiles.set(key, promise);
+  }
+  return state.tiles.get(key);
+}
+
+/** Segments (GeoJSON features) of the tiles covering a circle. */
+async function segmentsAround(center, radiusM) {
+  const z = state.metadata.tiles.minzoom;
+  const tiles = await Promise.all(tilesCoveringCircle(center, radiusM, z).map(([x, y]) => loadTile(z, x, y)));
+  return segmentsFromTiles(tiles.filter(Boolean));
+}
+
+function searchCenter() {
+  if (state.position) return state.position;
+  const { lng, lat } = map.getCenter();
+  return [lng, lat];
+}
+
 // --- state updates ------------------------------------------------------------
 
+function updateMapFilters() {
+  if (!map.getLayer("segments")) return;
+  const filter = mapFilter(state.criteria, state.pinnedId);
+  map.setFilter("segments", filter);
+  map.setFilter("segments-casing", filter);
+  map.setFilter("overview", overviewFilter(state.criteria));
+}
+
 function applyFilters() {
+  updateMapFilters();
+  refreshResults();
+}
+
+/** Recompute the result list from the tiles around the search center. */
+async function refreshResults() {
+  if (!state.archive) return;
+  const query = ++state.query;
+  const center = searchCenter();
+  const features = await segmentsAround(center, state.criteria.maxDistanceM);
+  if (query !== state.query) return; // a newer query was started meanwhile
   state.results = sortResults(
-    filterSegments(state.features, state.criteria, state.position, state.pinnedId),
+    filterSegments(features, state.criteria, center, state.pinnedId),
     state.sortBy,
   );
-  if (state.selectedId !== null && !state.results.some((r) => r.feature.properties.id === state.selectedId)) {
-    clearSelection();
-  }
   render();
 }
 
@@ -212,7 +303,7 @@ function clearSelection() {
   const id = state.selectedId;
   state.selectedId = null; // before popup.remove(), which fires "close"
   if (id !== null && map.getSource("segments")) {
-    map.setFeatureState({ source: "segments", id }, { selected: false });
+    map.setFeatureState({ source: "segments", sourceLayer: state.metadata.tiles.layer, id }, { selected: false });
   }
   popup.remove();
   updateUrl();
@@ -248,10 +339,6 @@ function whenLayersReady(callback) {
 }
 
 function render() {
-  const segments = map.getSource("segments");
-  if (segments) {
-    segments.setData({ type: "FeatureCollection", features: state.results.map((r) => r.feature) });
-  }
   const position = map.getSource("position");
   if (position) {
     position.setData(
@@ -290,37 +377,50 @@ function renderResults() {
   if (!state.results.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
-    empty.textContent = "Aucun segment ne correspond : élargissez les critères.";
+    empty.textContent = "Aucun segment ne correspond : élargissez les critères ou déplacez la carte.";
     list.append(empty);
   }
 }
 
-function selectSegment(id, lngLat = null) {
+/**
+ * Select a segment: highlight, popup, URL. `feature` is given when the
+ * segment comes from the map or a link rather than from the result list.
+ */
+function selectSegment(id, lngLat = null, feature = null) {
   if (state.pinnedId !== null && id !== state.pinnedId) unpin();
   const result = state.results.find((r) => r.feature.properties.id === id);
-  if (!result) return;
+  const selected = feature ?? result?.feature;
+  if (!selected) return;
   clearSelection();
   state.selectedId = id;
-  map.setFeatureState({ source: "segments", id }, { selected: true });
-  const coords = result.feature.geometry.coordinates;
-  const anchor = lngLat ?? coords[Math.floor(coords.length / 2)];
-  if (!lngLat) map.fitBounds(featuresBounds([result.feature]), { padding: 80, maxZoom: 16 });
-  popup.setLngLat(anchor).setHTML(popupHtml(result.feature.properties, result.distanceM)).addTo(map);
+  map.setFeatureState({ source: "segments", sourceLayer: state.metadata.tiles.layer, id }, { selected: true });
+  const lines = lineParts(selected.geometry);
+  const longest = lines.reduce((a, b) => (b.length > a.length ? b : a));
+  const anchor = lngLat ?? longest[Math.floor(longest.length / 2)];
+  if (!lngLat) map.fitBounds(featuresBounds([selected]), { padding: 80, maxZoom: 16 });
+  popup
+    .setLngLat(anchor)
+    .setHTML(popupHtml(selected.properties, result?.distanceM ?? null))
+    .addTo(map);
   updateUrl();
 }
 
 /** Show a segment from a link, even if the current filters hide it. */
-function focusSegment(id) {
-  const feature = state.features.find((f) => f.properties.id === id);
-  if (!feature) {
-    $("position-status").textContent = `Segment introuvable : ${id}.`;
-    return;
-  }
+async function focusSegment(id) {
+  const notFound = () => ($("position-status").textContent = `Segment introuvable : ${id}.`);
+  const { index, index_prefix_length: prefix } = state.metadata.tiles;
+  const response = await fetch(`${state.dataDir}${index}/${indexKey(id, prefix)}.json`);
+  const where = response.ok ? (await response.json())[id] : undefined;
+  if (!where) return notFound();
+  const feature = (await segmentsAround(where, LINK_RADIUS_M)).find((f) => f.id === id);
+  if (!feature) return notFound();
   $(`kind-${feature.properties.kind}`).checked = true;
   readControls();
   state.pinnedId = id;
-  applyFilters();
-  whenLayersReady(() => selectSegment(id));
+  updateMapFilters();
+  whenLayersReady(() => selectSegment(id, null, feature));
+  if (state.position) refreshResults(); // otherwise moveend (fitBounds) does it
+  return undefined;
 }
 
 function setPosition(position, label) {
@@ -397,31 +497,37 @@ $("latlon-form").addEventListener("submit", (event) => {
 
 // --- data loading -------------------------------------------------------------
 
-async function fetchCollection(url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-  return response.json();
+/** The published tileset, or the sample one: its segments.json and folder. */
+async function fetchMetadata() {
+  for (const dir of DATA_DIRS) {
+    const response = await fetch(`${dir}segments.json`);
+    if (response.ok) return { dir, metadata: await response.json() };
+  }
+  throw new Error("no segments.json");
 }
 
 async function loadData() {
-  let collection;
-  try {
-    collection = await fetchCollection(DATA_URL);
-  } catch {
-    collection = await fetchCollection(SAMPLE_URL);
-  }
-  const metadata = collection.metadata ?? {};
+  const { dir, metadata } = await fetchMetadata();
+  state.metadata = metadata;
+  state.dataDir = dir;
+  const url = new URL(`${dir}${metadata.tiles.url}`, location.href).href;
+  state.archive = new PMTiles(url);
+  protocol.add(state.archive);
   $("sample-banner").hidden = !metadata.sample;
   addAttribution(metadata.attribution ?? []);
-  state.features = collection.features;
-  const bounds = featuresBounds(state.features);
-  if (bounds && !initial.position && !initial.id) map.fitBounds(bounds, { padding: 40, duration: 0 });
-  applyFilters();
+  if (styleReady) addSegmentLayers();
+  const [west, south, east, north] = metadata.bounds ?? [];
+  if (metadata.bounds && !initial.position && !initial.id) {
+    map.fitBounds([[west, south], [east, north]], { padding: 40, duration: 0 });
+  }
   if (initial.position) {
     setPosition(initial.position, "lien");
     if (!initial.id) map.jumpTo({ center: initial.position, zoom: 14 });
+  } else {
+    $("position-status").textContent = "Aucune position : résultats autour du centre de la carte.";
+    refreshResults();
   }
-  if (initial.id) focusSegment(initial.id);
+  if (initial.id) await focusSegment(initial.id);
 }
 
 function addAttribution(dataAttribution) {

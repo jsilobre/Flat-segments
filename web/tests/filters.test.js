@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -9,7 +9,10 @@ import {
   featuresBounds,
   filterSegments,
   haversineMeters,
+  distanceToGeometryMeters,
   isLoop,
+  mapFilter,
+  overviewFilter,
   LOOP_SINUOSITY,
   matches,
   parseLatLon,
@@ -109,20 +112,19 @@ test("featuresBounds", () => {
   assert.equal(featuresBounds([]), null);
 });
 
-test("the sample dataset matches the expected schema", () => {
-  const url = new URL("../data/sample-segments.geojson", import.meta.url);
-  const collection = JSON.parse(readFileSync(url, "utf8"));
-  assert.equal(collection.type, "FeatureCollection");
-  assert.equal(collection.metadata.sample, true);
-  assert.ok(collection.features.length > 0);
-  for (const f of collection.features) {
-    assert.equal(f.geometry.type, "LineString");
-    for (const key of ["id", "kind", "length_m", "grade_mean_pct", "grade_max_pct", "n_crossings", "score"]) {
-      assert.ok(key in f.properties, `missing ${key}`);
-    }
-  }
-  const kinds = new Set(collection.features.map((f) => f.properties.kind));
-  assert.deepEqual([...kinds].sort(), ["climb", "flat"]);
+test("the sample tileset describes itself and indexes every segment", () => {
+  const dir = new URL("../data/sample/", import.meta.url);
+  const metadata = JSON.parse(readFileSync(new URL("segments.json", dir), "utf8"));
+  assert.equal(metadata.sample, true);
+  assert.equal(metadata.tiles.url, "segments.pmtiles");
+  assert.equal(metadata.tiles.minzoom, 12);
+  assert.equal(metadata.bounds.length, 4);
+  assert.ok(metadata.counts.flat > 0 && metadata.counts.climb > 0);
+  const total = metadata.counts.flat + metadata.counts.climb;
+  const indexed = readdirSync(new URL("ids/", dir)).flatMap((name) =>
+    Object.keys(JSON.parse(readFileSync(new URL(`ids/${name}`, dir), "utf8"))),
+  );
+  assert.equal(indexed.length, total);
 });
 
 test("URL state: parse and build are inverse, invalid values ignored", () => {
@@ -141,4 +143,54 @@ test("segments whose ends are close are shown as loops", () => {
   assert.equal(isLoop({ sinuosity: 225.7 }), true);
   assert.equal(isLoop({ sinuosity: LOOP_SINUOSITY }), false);
   assert.equal(isLoop({ sinuosity: 1.05 }), false);
+});
+
+// Evaluate the few MapLibre expression operators used by mapFilter.
+function evaluate(expression, properties) {
+  const [op, ...args] = expression;
+  const value = (arg) => (Array.isArray(arg) ? evaluate(arg, properties) : arg);
+  if (op === "get") return properties[args[0]];
+  if (op === "all") return args.every((a) => value(a));
+  if (op === "any") return args.some((a) => value(a));
+  const [a, b] = args.map(value);
+  return { "==": a === b, ">=": a >= b, "<=": a <= b }[op];
+}
+
+test("mapFilter selects exactly what matches selects, plus the pinned segment", () => {
+  const segments = [
+    { id: "a", kind: "flat", length_m: 400, grade_max_pct: 1.5, n_crossings: 0, surface: "paved" },
+    { id: "b", kind: "flat", length_m: 150, grade_max_pct: 0.5, n_crossings: 0, surface: "paved" },
+    { id: "c", kind: "flat", length_m: 900, grade_max_pct: 2.5, n_crossings: 2, surface: "gravel" },
+    { id: "d", kind: "climb", length_m: 300, grade_mean_pct: 2.97, n_crossings: 0, surface: "paved" },
+    { id: "e", kind: "climb", length_m: 300, grade_mean_pct: 8, n_crossings: 1, surface: "unknown" },
+  ];
+  const variants = [
+    { ...DEFAULT_CRITERIA },
+    { ...DEFAULT_CRITERIA, kind: "climb" },
+    { ...DEFAULT_CRITERIA, noCrossing: true, pavedOnly: true, maxLocalGradePct: 3, minLengthM: 100 },
+    { ...DEFAULT_CRITERIA, kind: "climb", minMeanGradePct: 5, maxMeanGradePct: 10 },
+  ];
+  for (const criteria of variants) {
+    for (const p of segments) {
+      assert.equal(evaluate(mapFilter(criteria), p), matches(p, criteria), `${p.id} ${JSON.stringify(criteria)}`);
+    }
+  }
+  const climbs = { ...DEFAULT_CRITERIA, kind: "climb" };
+  assert.equal(evaluate(mapFilter(climbs), segments[3]), false);
+  assert.equal(evaluate(mapFilter(climbs, "d"), segments[3]), true);
+  assert.equal(evaluate(overviewFilter(climbs), { kind: "climb", length_m: 300 }), true);
+  assert.equal(evaluate(overviewFilter(climbs), { kind: "flat", length_m: 300 }), false);
+});
+
+test("distances and bounds handle segments split into several lines", () => {
+  const geometry = {
+    type: "MultiLineString",
+    coordinates: [
+      [[1.5, 43.5], [1.51, 43.5]],
+      [[1.6, 43.6], [1.61, 43.6]],
+    ],
+  };
+  near(distanceToGeometryMeters([1.605, 43.6], geometry), 0, 0.01);
+  assert.deepEqual(featuresBounds([{ geometry }]), [[1.5, 43.5], [1.61, 43.6]]);
+  assert.equal(isLoop({}), true); // no sinuosity in the tile: closed ring
 });

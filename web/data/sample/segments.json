@@ -1,0 +1,28 @@
+{
+ "schema_version": "0.1",
+ "generated_at": "2026-09-30T00:00:00Z",
+ "sample": true,
+ "attribution": [
+  "Données fictives générées par scripts/make_sample_data.py"
+ ],
+ "bounds": [
+  1.51982,
+  43.52593,
+  1.55158,
+  43.53742
+ ],
+ "counts": {
+  "flat": 8,
+  "climb": 2
+ },
+ "tiles": {
+  "url": "segments.pmtiles",
+  "layer": "segments",
+  "minzoom": 12,
+  "maxzoom": 14,
+  "overview_layer": "overview",
+  "overview_minzoom": 8,
+  "index": "ids",
+  "index_prefix_length": 2
+ }
+}

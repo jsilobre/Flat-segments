@@ -77,6 +77,10 @@ lignes.
   - C'est proche de la limite de 100 Mo par fichier de GitHub : il faudra
     peut-être un fichier par département, ou une publication hors du dépôt
     Git.
+- **GitHub Pages** (vérifié au premier déploiement, [étape 2.2](../phase-2/2.2-tuiles.md)) :
+  il compresse le `.pmtiles` si le client envoie `Accept-Encoding: gzip`,
+  mais les navigateurs ne l'envoient pas sur les requêtes partielles. Le site
+  fonctionne dans Chromium et Firefox. Le constat initial suit.
 - **GitHub Pages** répond aux requêtes partielles (`206`, `Accept-Ranges`,
   CORS ouvert). Mais il compresse en gzip les types texte, et la plage porte
   alors sur les octets compressés, ce qui casserait la lecture.

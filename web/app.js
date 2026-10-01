@@ -58,6 +58,7 @@ const state = {
   tiles: new Map(), // "z/x/y" -> Promise of a decoded tile (or null)
   results: [],
   query: 0, // id of the latest result query (older answers are ignored)
+  missingTiles: 0, // tiles of the latest query that could not be read
   position: null,
   criteria: { ...DEFAULT_CRITERIA },
   sortBy: "distance",
@@ -247,21 +248,34 @@ function emptyCollection() {
 function loadTile(z, x, y) {
   const key = `${z}/${x}/${y}`;
   if (!state.tiles.has(key)) {
-    const promise = state.archive.getZxy(z, x, y).then((response) => {
-      if (!response) return null;
-      const layer = decodeTile(new Uint8Array(response.data))[state.metadata.tiles.layer];
-      return layer ? { z, x, y, layer } : null;
-    });
+    const fetchTile = () => state.archive.getZxy(z, x, y);
+    const promise = fetchTile()
+      .catch(fetchTile) // one more try: mobile networks drop requests
+      .then((response) => {
+        if (!response) return null;
+        const layer = decodeTile(new Uint8Array(response.data))[state.metadata.tiles.layer];
+        return layer ? { z, x, y, layer } : null;
+      });
+    // A failure is not cached: the next query asks again.
+    promise.catch(() => state.tiles.delete(key));
     state.tiles.set(key, promise);
   }
   return state.tiles.get(key);
 }
 
-/** Segments (GeoJSON features) of the tiles covering a circle. */
+/**
+ * Segments (GeoJSON features) of the tiles covering a circle, and the number
+ * of tiles that could not be read (their segments are missing).
+ */
 async function segmentsAround(center, radiusM) {
   const z = state.metadata.tiles.minzoom;
-  const tiles = await Promise.all(tilesCoveringCircle(center, radiusM, z).map(([x, y]) => loadTile(z, x, y)));
-  return segmentsFromTiles(tiles.filter(Boolean));
+  const settled = await Promise.allSettled(
+    tilesCoveringCircle(center, radiusM, z).map(([x, y]) => loadTile(z, x, y)),
+  );
+  const tiles = settled.filter((s) => s.status === "fulfilled").map((s) => s.value);
+  const failed = settled.length - tiles.length;
+  if (failed) console.warn(`${failed} tile(s) could not be read`, settled.find((s) => s.reason)?.reason);
+  return { features: segmentsFromTiles(tiles.filter(Boolean)), failed };
 }
 
 function searchCenter() {
@@ -290,12 +304,13 @@ async function refreshResults() {
   if (!state.archive) return;
   const query = ++state.query;
   const center = searchCenter();
-  const features = await segmentsAround(center, state.criteria.maxDistanceM);
+  const { features, failed } = await segmentsAround(center, state.criteria.maxDistanceM);
   if (query !== state.query) return; // a newer query was started meanwhile
   state.results = sortResults(
     filterSegments(features, state.criteria, center, state.pinnedId),
     state.sortBy,
   );
+  state.missingTiles = failed;
   render();
 }
 
@@ -374,7 +389,14 @@ function renderResults() {
     item.append(button);
     list.append(item);
   }
-  if (!state.results.length) {
+  if (state.missingTiles) {
+    const warning = document.createElement("li");
+    warning.className = "hint warning";
+    warning.textContent =
+      "Une partie de la zone n'a pas pu être chargée (réseau) : la liste est incomplète. " +
+      "Elle se complètera à la prochaine recherche.";
+    list.prepend(warning);
+  } else if (!state.results.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
     empty.textContent = "Aucun segment ne correspond : élargissez les critères ou déplacez la carte.";
@@ -412,7 +434,8 @@ async function focusSegment(id) {
   const response = await fetch(`${state.dataDir}${index}/${indexKey(id, prefix)}.json`);
   const where = response.ok ? (await response.json())[id] : undefined;
   if (!where) return notFound();
-  const feature = (await segmentsAround(where, LINK_RADIUS_M)).find((f) => f.id === id);
+  const { features } = await segmentsAround(where, LINK_RADIUS_M);
+  const feature = features.find((f) => f.id === id);
   if (!feature) return notFound();
   $(`kind-${feature.properties.kind}`).checked = true;
   readControls();

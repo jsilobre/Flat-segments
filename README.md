@@ -56,6 +56,11 @@ Déjà en place :
   15 segments conformes sur 18 vérifiés, aucune erreur de pente ni de
   traversée.
 
+Prochaine étape, **phase 2** : couvrir toute la France par précalcul
+statique (PMTiles), en commençant par l'ex-Midi-Pyrénées. Voir
+l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
+[plan](docs/architecture.md#51-plan-de-la-phase-2).
+
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
 

@@ -95,6 +95,15 @@ uv run flat-segments download-dem   # dalles MNT LiDAR HD de l'emprise → data/
 uv run flat-segments pipeline       # extract + elevation + detect + export → web/data/segments.geojson
 ```
 
+Production par département (phase 2) : le traitement reprend après une
+interruption, et le MNT est supprimé une fois utilisé.
+
+```bash
+uv run flat-segments download-departments                      # contours (Admin Express)
+uv run flat-segments department 31 --pbf data/raw/midi_pyrenees.osm.pbf
+uv run flat-segments departments 09 31 82 --pbf data/raw/midi_pyrenees.osm.pbf
+```
+
 Si Geofabrik est inaccessible, `download-osm --url` accepte le miroir
 d'OpenStreetMap France (voir [`docs/data-sources.md`](docs/data-sources.md#téléchargement)).
 

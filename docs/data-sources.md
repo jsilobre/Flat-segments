@@ -206,6 +206,24 @@ L'export GeoJSON choisit la mention selon la source réellement utilisée.
 
 Les parades sont décrites dans [`algorithm.md` § 3–5](algorithm.md#4-ponts-tunnels-et-trous).
 
+## Contours des départements : Admin Express (IGN)
+
+Pour la production par département (phase 2), les contours viennent
+d'**Admin Express**, dans son édition COG CARTO (généralisée, adaptée à la
+cartographie). Ils servent seulement à découper le travail : ils ne sont pas
+publiés.
+
+```bash
+uv run flat-segments download-departments   # → data/raw/departements.geojson
+```
+
+- Service : WFS de la Géoplateforme, `https://data.geopf.fr/wfs/ows`, couche
+  `ADMINEXPRESS-COG-CARTO.LATEST:departement` ; propriétés `code_insee`,
+  `nom_officiel`.
+- Géométries en WGS84 (lon, lat), un fichier GeoJSON d'environ 20 Mo pour 101
+  départements (métropole et DROM).
+- Licence : Licence Ouverte 2.0 (Etalab), « IGN – Admin Express ».
+
 ## Repli hors de France : MNT 30 m
 
 Hors de France (phase 3), on peut se replier sur **Copernicus GLO-30** ou

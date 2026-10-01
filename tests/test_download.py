@@ -187,6 +187,24 @@ def test_download_dem_replaces_tiles_from_another_layer(tmp_path: Path) -> None:
     assert raster_source(vrt) == "rge_alti_wms"
 
 
+def test_download_dem_replaces_tiles_from_another_grid(tmp_path: Path) -> None:
+    web = FakeWeb({dl.WMS_URL: fake_wms})
+    bounds = (1000.0, 2000.0, 1400.0, 2400.0)
+    dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5)
+    assert len(web.requests) == 4
+    # Same south-west corner (same file name) for the first tile, other size.
+    vrt = dl.download_dem(bounds, tmp_path, web, tile_size_m=400, resolution_m=10)
+    assert len(web.requests) == 5
+    with RasterDem(vrt) as dem:
+        xy = np.array([[1350.0, 2350.0], [1010.0, 2010.0]])
+        np.testing.assert_allclose(dem.sample(xy), plane(xy[:, 0], xy[:, 1]), rtol=1e-6)
+
+
+def test_default_grid_is_2_m_in_4_km_tiles() -> None:
+    [tile, *_] = dl.dem_tiles((0, 0, 8000, 4000), dl.DEM_TILE_SIZE_M, dl.DEM_RESOLUTION_M)
+    assert (tile.max_x - tile.min_x, tile.width, tile.height) == (4000, 2000, 2000)
+
+
 def test_build_vrt_needs_tiles(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no tile"):
         dl.build_vrt([], tmp_path / "x.vrt")

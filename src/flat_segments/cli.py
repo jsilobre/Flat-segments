@@ -17,7 +17,13 @@ from flat_segments import __version__
 from flat_segments import pipeline as steps
 from flat_segments.config import ConfigError, load_params, params_to_toml
 from flat_segments.detect import Segment, SegmentKind
-from flat_segments.download import GEOFABRIK_URL, WMS_LAYER, WMS_URL
+from flat_segments.download import (
+    DEM_RESOLUTION_M,
+    DEM_TILE_SIZE_M,
+    GEOFABRIK_URL,
+    WMS_LAYER,
+    WMS_URL,
+)
 from flat_segments.params import PILOT_BBOX_WGS84, PipelineParams
 
 PATHS = steps.DataPaths()
@@ -231,8 +237,8 @@ def download_dem(
     out_dir: Annotated[
         Path, typer.Option(help="Output folder.", file_okay=False)
     ] = PATHS.dem.parent,
-    tile_size_m: Annotated[float, typer.Option(help="Tile size (metres).")] = 2000.0,
-    resolution_m: Annotated[float, typer.Option(help="Pixel size (metres).")] = 1.0,
+    tile_size_m: Annotated[float, typer.Option(help="Tile size (metres).")] = DEM_TILE_SIZE_M,
+    resolution_m: Annotated[float, typer.Option(help="Pixel size (metres).")] = DEM_RESOLUTION_M,
     wms_url: Annotated[str, typer.Option(help="WMS endpoint.")] = WMS_URL,
     layer: Annotated[str, typer.Option(help="WMS elevation layer.")] = WMS_LAYER,
     force: Annotated[bool, typer.Option(help="Download tiles already on disk.")] = False,

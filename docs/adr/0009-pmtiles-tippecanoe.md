@@ -66,11 +66,14 @@ lignes.
   PMTiles. Le reste du pipeline et ses tests n'en dépendent pas : les tests de
   cette étape seront sautés si tippecanoe est absent, et la CI l'installera
   (étape 2.2).
-- **Ordre de grandeur des volumes** (extrapolé, zone pilote dense, donc
-  majorant) : environ 150 Mo pour l'ex-Midi-Pyrénées et 1 à 2 Go pour la
-  métropole.
-  - Midi-Pyrénées dépasse la limite de 100 Mo par fichier de GitHub : il
-    faudra un fichier par département, ou publier l'archive hors du dépôt
+- **Ordre de grandeur des volumes**. L'estimation initiale, extrapolée de la
+  zone pilote, était d'environ 150 Mo pour l'ex-Midi-Pyrénées et de 1 à
+  2 Go pour la métropole. Elle a été recalée sur la Haute-Garonne complète
+  ([étape 2.1](../phase-2/2.1-departement.md)), qui donne 16,8 Mo.
+  - On attend 60 à 110 Mo pour l'ex-Midi-Pyrénées et au plus 1,4 Go pour la
+    métropole.
+  - C'est proche de la limite de 100 Mo par fichier de GitHub : il faudra
+    peut-être un fichier par département, ou une publication hors du dépôt
     Git.
 - **GitHub Pages** répond aux requêtes partielles (`206`, `Accept-Ranges`,
   CORS ouvert). Mais il compresse en gzip les types texte, et la plage porte

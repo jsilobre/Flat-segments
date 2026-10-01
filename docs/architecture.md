@@ -81,6 +81,19 @@ Chaque étape est une commande de la CLI Typer `flat-segments` :
 Le découpage en quatre étapes permet de régler les seuils de détection
 (`detect`) sans relire le PBF ni rééchantillonner le MNT.
 
+**Production par département** (phase 2, [étape 2.1](phase-2/2.1-departement.md)) :
+
+| Commande | Entrée | Sortie | Modules |
+|---|---|---|---|
+| `download-departments` | WFS de la Géoplateforme (Admin Express) | `data/raw/departements.geojson` | `departments.py` |
+| `department CODE` | extrait OSM régional + contours | `data/departments/CODE/` : `strokes.parquet`, `profiles.parquet`, `segments.parquet`, `state.json` | `batch.py`, `departments.py` |
+| `departments CODE…` | idem, plusieurs départements | idem, plus un récapitulatif | `batch.py` |
+
+Un département est traité sur son contour élargi de 2 km. On garde les
+segments dont le milieu est dans le département, si bien que chaque segment
+appartient à un seul département. Chaque étape terminée est notée dans
+`state.json`, et une relance reprend après la dernière.
+
 **Paramètres.** Les étapes utilisent les valeurs par défaut de `params.py`,
 remplacées par un fichier TOML (`--config`, modèle dans
 `configs/default.toml`) puis par des surcharges `--set cle=valeur`. `detect`
@@ -114,6 +127,8 @@ Les modules :
 | `export.py` | Lecture/écriture GeoParquet, export GeoJSON (WGS84) | E/S |
 | `download.py` | Téléchargements : extrait OSM (MD5), dalles MNT par WMS, assemblage en VRT | E/S |
 | `pipeline.py` | Les quatre étapes sous forme de fonctions, partagées par les commandes | E/S |
+| `departments.py` | Contours des départements (Admin Express), règle du milieu pour rattacher un segment | pur + E/S |
+| `batch.py` | Production par département : étapes avec reprise, état, récapitulatif | E/S |
 | `calibration.py` | Rapport, balayage de paramètres, graphique de profil, fiche de validation | pur + E/S |
 | `cli.py` | CLI Typer, câblage des étapes | E/S |
 
@@ -130,11 +145,14 @@ data/
 ├── raw/
 │   ├── midi-pyrenees-latest.osm.pbf   # extrait régional (Geofabrik ou miroir)
 │   ├── pilot.osm.pbf                  # extrait découpé sur la zone pilote
+│   ├── departements.geojson           # contours des départements (Admin Express)
 │   └── dem/
 │       ├── tiles/*.tif                # dalles MNT LiDAR HD (GeoTIFF compressés)
 │       └── pilot.vrt                  # mosaïque virtuelle GDAL
 ├── interim/      # strokes.parquet, profiles.parquet
-└── processed/    # segments.parquet (GeoParquet, Lambert-93), segments.params.toml, inspect/*.png
+├── processed/    # segments.parquet (GeoParquet, Lambert-93), segments.params.toml, inspect/*.png
+└── departments/
+    └── 31/       # strokes, profiles, segments (+ params), state.json ; dem/ supprimé après usage
 ```
 
 Le schéma de chaque table est décrit dans [`data-model.md`](data-model.md).
@@ -259,7 +277,7 @@ recalés à l'échelle régionale.
 | Étape | Contenu | Point à vérifier |
 |---|---|---|
 | **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Pas de 2 m adopté (amendement de l'ADR 0007) |
-| **2.1 Pipeline par département** | Commande de traitement d'une liste de zones (contour du département), MNT téléchargé puis supprimé dalle par dalle, reprise après erreur, un `segments.parquet` par département | Disque et durée d'un département (≈ 6000 km², 2 à 3 h de MNT estimées) |
+| **2.1 Pipeline par département** *(faite, [rapport](phase-2/2.1-departement.md))* | Commandes `department` et `departments` : contour Admin Express élargi de 2 km, MNT limité aux dalles utiles, rattachement au département qui contient le milieu, reprise. Haute-Garonne : 31 min 31 s, 45 341 segments, résultats identiques à ceux du pilote | Volume des PMTiles régionaux par rapport à la limite de 100 Mo de GitHub (étape 2.3) |
 | **2.2 PMTiles et front sur tuiles** | Export PMTiles, tous les attributs à partir du zoom ≈ 12. Le front construit la liste à partir des tuiles chargées autour de la position ; liens directs `?id=` via un petit index (id → position) | Taille de l'index ; tri et filtre de distance sur les seuls segments chargés |
 | **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |
 | **2.4 Production automatisée** | Workflow GitHub Actions, une tâche par département, puis assemblage ; régénération périodique | Limites d'Actions (6 h et ~14 Go de disque par tâche) et limites d'usage de l'IGN |

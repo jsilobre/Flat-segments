@@ -200,6 +200,65 @@ def test_download_dem_replaces_tiles_from_another_grid(tmp_path: Path) -> None:
         np.testing.assert_allclose(dem.sample(xy), plane(xy[:, 0], xy[:, 1]), rtol=1e-6)
 
 
+def test_download_dem_only_fetches_tiles_touching_the_area(tmp_path: Path) -> None:
+    from shapely.geometry import box
+
+    web = FakeWeb({dl.WMS_URL: fake_wms})
+    bounds = (1000.0, 2000.0, 1600.0, 2200.0)  # three 200 m tiles in a row
+    area = box(1050.0, 2050.0, 1150.0, 2150.0).union(box(1450.0, 2050.0, 1550.0, 2150.0))
+    vrt = dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5, area=area)
+    assert len(web.requests) == 2  # the middle tile is skipped
+    with RasterDem(vrt) as dem:
+        z = dem.sample(np.array([[1100.0, 2100.0], [1300.0, 2100.0], [1500.0, 2100.0]]))
+    assert z[0] == pytest.approx(plane(np.array(1100.0), np.array(2100.0)))
+    assert np.isnan(z[1])  # gap between the tiles: nodata
+    assert z[2] == pytest.approx(plane(np.array(1500.0), np.array(2100.0)))
+
+
+def test_download_dem_in_parallel_reports_every_tile_and_replaces_broken_ones(
+    tmp_path: Path,
+) -> None:
+    web = FakeWeb({dl.WMS_URL: fake_wms})
+    bounds = (1000.0, 2000.0, 1800.0, 2400.0)  # 4 x 2 tiles of 200 m
+    seen: list[tuple[int, int]] = []
+    dl.download_dem(
+        bounds,
+        tmp_path,
+        web,
+        tile_size_m=200,
+        resolution_m=5,
+        workers=3,
+        on_tile=lambda i, n, t: seen.append((i, n)),
+    )
+    assert seen == [(i, 8) for i in range(1, 9)]
+    assert len(web.requests) == 8
+    assert not list((tmp_path / "tiles").glob("*.part"))
+    (tmp_path / "tiles" / "1000_2000.tif").write_bytes(b"truncated")
+    vrt = dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5)
+    assert len(web.requests) == 9  # only the broken tile
+    with RasterDem(vrt) as dem:
+        assert dem.sample(np.array([[1100.0, 2100.0]]))[0] == pytest.approx(
+            plane(np.array(1100.0), np.array(2100.0))
+        )
+
+
+def test_download_dem_stops_at_the_first_failure(tmp_path: Path) -> None:
+    web = FakeWeb({})  # every request fails with HTTP 404
+    with pytest.raises(dl.DownloadError, match="404"):
+        dl.download_dem(
+            (0.0, 0.0, 800.0, 400.0), tmp_path, web, tile_size_m=200, resolution_m=5, workers=2
+        )
+
+
+def test_snap_bounds_to_the_tile_grid() -> None:
+    assert dl.snap_bounds((576_100.0, 6_265_000.0, 603_900.0, 6_277_999.0), 4000) == (
+        576_000.0,
+        6_264_000.0,
+        604_000.0,
+        6_280_000.0,
+    )
+
+
 def test_default_grid_is_2_m_in_4_km_tiles() -> None:
     [tile, *_] = dl.dem_tiles((0, 0, 8000, 4000), dl.DEM_TILE_SIZE_M, dl.DEM_RESOLUTION_M)
     assert (tile.max_x - tile.min_x, tile.width, tile.height) == (4000, 2000, 2000)

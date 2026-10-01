@@ -269,6 +269,104 @@ def download_dem(
     typer.echo(f"DEM -> {vrt}")
 
 
+DEPARTMENTS_FILE = Path("data/raw/departements.geojson")
+DEPARTMENTS_ROOT = Path("data/departments")
+RegionalPbf = Annotated[
+    Path,
+    typer.Option(help="Regional OSM extract covering the département(s) and margin.", exists=True),
+]
+DepartmentsFileOpt = Annotated[
+    Path, typer.Option(help="Outlines from download-departments.", exists=True, dir_okay=False)
+]
+RootOpt = Annotated[Path, typer.Option(help="Output folder (one sub-folder per département).")]
+KeepDemOpt = Annotated[bool, typer.Option(help="Keep the DEM tiles after sampling.")]
+ForceOpt = Annotated[bool, typer.Option(help="Start again from scratch.")]
+
+
+@app.command("download-departments")
+def download_departments(
+    out: Annotated[Path, _out("Output GeoJSON (WGS84).")] = DEPARTMENTS_FILE,
+) -> None:
+    """Download the outlines of the French départements (IGN Admin Express)."""
+    from flat_segments import departments as dep
+    from flat_segments import download as dl
+
+    try:
+        path = dep.download_departments(out, dl.urlopen)
+    except dl.DownloadError as error:
+        typer.echo(f"Download failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"départements -> {path}")
+
+
+def _run_departments(
+    codes: list[str],
+    pbf: Path,
+    departments_file: Path,
+    root: Path,
+    params: PipelineParams,
+    keep_dem: bool,
+    force: bool,
+) -> dict[str, dict[str, object] | str]:
+    from flat_segments import download as dl
+    from flat_segments.batch import run_department
+
+    states: dict[str, dict[str, object] | str] = {}
+    for code in codes:
+        try:
+            states[code] = run_department(
+                code,
+                pbf,
+                departments_file,
+                root,
+                params,
+                opener=dl.urlopen,
+                keep_dem=keep_dem,
+                force=force,
+                log=typer.echo,
+            )
+        except Exception as error:  # one failure must not stop the batch
+            typer.echo(f"{code}: failed: {error}", err=True)
+            states[code] = f"{type(error).__name__}: {error}"
+    return states
+
+
+@app.command()
+def department(
+    code: Annotated[str, typer.Argument(help="INSEE code, e.g. 31.")],
+    pbf: RegionalPbf,
+    departments_file: DepartmentsFileOpt = DEPARTMENTS_FILE,
+    root: RootOpt = DEPARTMENTS_ROOT,
+    keep_dem: KeepDemOpt = False,
+    force: ForceOpt = False,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Process one département (resumable): strokes, DEM, profiles, segments."""
+    departments([code], pbf, departments_file, root, keep_dem, force, config, overrides)
+
+
+@app.command()
+def departments(
+    codes: Annotated[list[str], typer.Argument(help="INSEE codes, e.g. 09 12 31.")],
+    pbf: RegionalPbf,
+    departments_file: DepartmentsFileOpt = DEPARTMENTS_FILE,
+    root: RootOpt = DEPARTMENTS_ROOT,
+    keep_dem: KeepDemOpt = False,
+    force: ForceOpt = False,
+    config: ConfigOpt = None,
+    overrides: SetOpt = None,
+) -> None:
+    """Process several départements in turn; a failure does not stop the others."""
+    from flat_segments.batch import summary_table
+
+    params = get_params(config, overrides)
+    states = _run_departments(codes, pbf, departments_file, root, params, keep_dem, force)
+    typer.echo(summary_table(states), nl=False)
+    if any(isinstance(state, str) for state in states.values()):
+        raise typer.Exit(1)
+
+
 def _detection_params(
     segments: Path, config: Path | None, overrides: list[str] | None
 ) -> PipelineParams:

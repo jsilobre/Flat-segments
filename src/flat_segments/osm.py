@@ -9,13 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
 from flat_segments.geometry import FloatArray, Projector, make_projector
 from flat_segments.network import RoadClass, Way
 from flat_segments.params import WORK_CRS
+
+if TYPE_CHECKING:
+    from shapely.geometry.base import BaseGeometry
 
 MAJOR_HIGHWAYS: Final = frozenset(
     {
@@ -217,7 +220,9 @@ class RawWay(NamedTuple):
 
 
 def iter_relevant_ways(
-    path: Path, bbox: tuple[float, float, float, float] | None = None
+    path: Path,
+    bbox: tuple[float, float, float, float] | None = None,
+    area: BaseGeometry | None = None,
 ) -> Iterator[RawWay]:
     """Stream the ``highway=*`` ways kept by :func:`classify_way`.
 
@@ -225,8 +230,15 @@ def iter_relevant_ways(
         path: ``.osm.pbf`` or ``.osm`` file.
         bbox: WGS84 ``(min_lon, min_lat, max_lon, max_lat)``; ways with at
             least one node inside are kept whole.
+        area: WGS84 polygon (e.g. a département outline grown by a margin);
+            ways with at least one node inside are kept whole.
     """
     import osmium
+    import shapely
+
+    if area is not None:
+        shapely.prepare(area)
+        area_bbox = area.bounds
 
     processor = (
         osmium.FileProcessor(str(path), osmium.osm.NODE | osmium.osm.WAY)
@@ -246,6 +258,11 @@ def iter_relevant_ways(
         lonlat = np.array([(n.location.lon, n.location.lat) for n in nodes], dtype=np.float64)
         if bbox is not None and not _in_bbox(lonlat, bbox):
             continue
+        if area is not None and not (
+            _in_bbox(lonlat, area_bbox)
+            and shapely.contains_xy(area, lonlat[:, 0], lonlat[:, 1]).any()
+        ):
+            continue
         yield RawWay(obj.id, tuple(n.ref for n in nodes), lonlat, tags)
 
 
@@ -253,6 +270,7 @@ def read_ways(
     path: Path,
     bbox: tuple[float, float, float, float] | None = None,
     project: Projector | None = None,
+    area: BaseGeometry | None = None,
 ) -> list[Way]:
     """Read all relevant ``highway=*`` ways from an OSM file.
 
@@ -261,13 +279,14 @@ def read_ways(
         bbox: WGS84 ``(min_lon, min_lat, max_lon, max_lat)``; ways with at
             least one node inside are kept whole.
         project: Projection of lon/lat arrays; defaults to Lambert-93.
+        area: WGS84 polygon; ways with at least one node inside are kept whole.
 
     Returns:
         Ways in file order, including MAJOR roads (used as barriers).
     """
     project = project or make_projector("EPSG:4326", WORK_CRS)
     ways: list[Way] = []
-    for raw in iter_relevant_ways(path, bbox):
+    for raw in iter_relevant_ways(path, bbox, area):
         way = way_from_osm(raw.id, raw.node_ids, project(raw.lonlat), raw.tags)
         if way is not None:
             ways.append(way)

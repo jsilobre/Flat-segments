@@ -176,9 +176,31 @@ def export(
     out: GeojsonOut = PATHS.geojson,
     sample: SampleOpt = False,
 ) -> None:
-    """Export segments to GeoJSON for the web page."""
+    """Export segments to GeoJSON (inspection; the page reads export-pmtiles)."""
     count = steps.run_export(segments, out, sample=sample)
     typer.echo(f"{count} segments -> {out}")
+
+
+@app.command("export-pmtiles")
+def export_pmtiles(
+    segments: Annotated[
+        list[Path] | None,
+        typer.Argument(help="Segments GeoParquet files (default: the pilot run).", exists=True),
+    ] = None,
+    out_dir: Annotated[
+        Path, typer.Option(help="Published folder (segments.pmtiles, segments.json, ids/).")
+    ] = PATHS.web_data,
+    sample: SampleOpt = False,
+) -> None:
+    """Publish segments as vector tiles for the web page (needs tippecanoe)."""
+    from flat_segments.tiles import TippecanoeError
+
+    try:
+        count, files = steps.run_publish(segments or [PATHS.segments], out_dir, sample=sample)
+    except (ValueError, TippecanoeError) as error:
+        typer.echo(f"Export failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"{count} segments -> {files.pmtiles}, {files.metadata}, {files.index_dir}/")
 
 
 @app.command()

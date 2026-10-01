@@ -75,7 +75,46 @@ Champs **internes**, présents seulement dans le GeoParquet :
   calcule.
 - **Rang** : il dépend des filtres choisis ; le front trie.
 
-## Export GeoJSON
+## Publication en tuiles vectorielles (site)
+
+Depuis l'[étape 2.2](phase-2/2.2-tuiles.md), le site lit trois éléments dans
+`web/data/`, écrits par `flat-segments export-pmtiles`
+([ADR 0009](adr/0009-pmtiles-tippecanoe.md)).
+
+**`segments.pmtiles`** : tuiles vectorielles (MVT, compressées en gzip,
+projection Web Mercator) en deux couches.
+
+| Couche | Zooms | Propriétés |
+|---|---|---|
+| `segments` | 12 à 14 (agrandies au-delà) | tous les champs publics de la table `segments`, sans perte |
+| `overview` | 8 à 11 | `id`, `kind`, `length_m` ; segments éclaircis là où ils sont trop denses |
+
+- Les tuiles vectorielles ne connaissent ni listes ni valeurs nulles :
+  - les listes (`highways`, `osm_way_ids`, `quality_flags`, `fits_targets_m`)
+    sont écrites en chaînes JSON (`"[200,400]"`) ;
+  - les valeurs nulles (`name`, `sinuosity` d'une boucle fermée) sont omises.
+- Un segment coupé par le bord d'une tuile apparaît dans chacune des tuiles
+  qu'il traverse. Le front recolle les morceaux grâce à son `id`.
+
+**`segments.json`** : description du jeu publié.
+
+| Clé | Contenu |
+|---|---|
+| `schema_version`, `generated_at`, `sample`, `attribution`, `params` | comme le membre `metadata` du GeoJSON (ci-dessous) |
+| `bounds` | emprise `[ouest, sud, est, nord]` (WGS84) |
+| `counts` | nombre de plats (`flat`) et de côtes (`climb`) |
+| `tiles` | fichier, nom et zooms des couches, dossier et longueur de préfixe de l'index |
+
+**`ids/XX.json`** : `{"flat-3fa2b1c9d0e4": [lon, lat], …}`, la position (point
+milieu) de chaque segment.
+- Un fichier par valeur des deux premiers caractères hexadécimaux de
+  l'identifiant (`3f.json`), soit 256 fichiers au plus.
+- Le front s'en sert pour ouvrir un lien `?id=` sans charger tout le jeu.
+
+## Export GeoJSON (inspection)
+
+Écrit par `flat-segments export` (et par `pipeline`) dans `data/processed/`,
+pour inspecter un jeu dans QGIS ou un éditeur. Le site ne le lit plus.
 
 `FeatureCollection` conforme à la RFC 7946 : WGS84, coordonnées `[lon, lat]`
 arrondies à 6 décimales. Les champs internes sont retirés. Un membre

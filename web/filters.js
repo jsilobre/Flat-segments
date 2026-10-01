@@ -21,9 +21,14 @@ export const DEFAULT_CRITERIA = Object.freeze({
  */
 export const LOOP_SINUOSITY = 3;
 
-/** Whether a segment is (nearly) a loop; `sinuosity` is null for a closed one. */
+/** Whether a segment is (nearly) a loop; `sinuosity` is null (or absent) for a closed one. */
 export function isLoop(properties) {
-  return properties.sinuosity === null || properties.sinuosity > LOOP_SINUOSITY;
+  return properties.sinuosity == null || properties.sinuosity > LOOP_SINUOSITY;
+}
+
+/** The lines of a LineString or MultiLineString geometry. */
+export function lineParts(geometry) {
+  return geometry.type === "MultiLineString" ? geometry.coordinates : [geometry.coordinates];
 }
 
 const toRad = (deg) => (deg * Math.PI) / 180;
@@ -62,6 +67,11 @@ export function distanceToLineMeters(point, coords) {
   return best;
 }
 
+/** Shortest distance in metres from a point to a (multi)line geometry. */
+export function distanceToGeometryMeters(point, geometry) {
+  return Math.min(...lineParts(geometry).map((line) => distanceToLineMeters(point, line)));
+}
+
 /** Whether a segment's properties satisfy the criteria (distance excluded). */
 export function matches(properties, criteria) {
   const p = properties;
@@ -73,6 +83,33 @@ export function matches(properties, criteria) {
   return (
     p.grade_mean_pct >= criteria.minMeanGradePct && p.grade_mean_pct <= criteria.maxMeanGradePct
   );
+}
+
+/**
+ * MapLibre filter expression equivalent to `matches` (map layer of the tiles).
+ * @param pinnedId id of a segment always shown (see filterSegments).
+ */
+export function mapFilter(criteria, pinnedId = null) {
+  const get = (key) => ["get", key];
+  const conditions = [
+    ["==", get("kind"), criteria.kind],
+    [">=", get("length_m"), criteria.minLengthM],
+  ];
+  if (criteria.noCrossing) conditions.push(["==", get("n_crossings"), 0]);
+  if (criteria.pavedOnly) conditions.push(["==", get("surface"), "paved"]);
+  if (criteria.kind === "flat") {
+    conditions.push(["<=", get("grade_max_pct"), criteria.maxLocalGradePct]);
+  } else {
+    conditions.push([">=", get("grade_mean_pct"), criteria.minMeanGradePct]);
+    conditions.push(["<=", get("grade_mean_pct"), criteria.maxMeanGradePct]);
+  }
+  const filter = ["all", ...conditions];
+  return pinnedId === null ? filter : ["any", ["==", get("id"), pinnedId], filter];
+}
+
+/** Filter of the overview layer (low zooms): only the kind and length are there. */
+export function overviewFilter(criteria) {
+  return ["all", ["==", ["get", "kind"], criteria.kind], [">=", ["get", "length_m"], criteria.minLengthM]];
 }
 
 /**
@@ -90,7 +127,7 @@ export function filterSegments(features, criteria, position = null, pinnedId = n
     if (!pinned && !matches(feature.properties, criteria)) continue;
     let distanceM = null;
     if (position) {
-      distanceM = distanceToLineMeters(position, feature.geometry.coordinates);
+      distanceM = distanceToGeometryMeters(position, feature.geometry);
       if (!pinned && distanceM > criteria.maxDistanceM) continue;
     }
     results.push({ feature, distanceM });
@@ -128,11 +165,13 @@ export function featuresBounds(features) {
   let maxLon = -Infinity;
   let maxLat = -Infinity;
   for (const feature of features) {
-    for (const [lon, lat] of feature.geometry.coordinates) {
-      minLon = Math.min(minLon, lon);
-      minLat = Math.min(minLat, lat);
-      maxLon = Math.max(maxLon, lon);
-      maxLat = Math.max(maxLat, lat);
+    for (const line of lineParts(feature.geometry)) {
+      for (const [lon, lat] of line) {
+        minLon = Math.min(minLon, lon);
+        minLat = Math.min(minLat, lat);
+        maxLon = Math.max(maxLon, lon);
+        maxLat = Math.max(maxLat, lat);
+      }
     }
   }
   return Number.isFinite(minLon) ? [[minLon, minLat], [maxLon, maxLat]] : null;

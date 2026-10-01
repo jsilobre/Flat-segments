@@ -1,9 +1,9 @@
 """Generate the fictitious sample dataset of the web page.
 
 Builds a synthetic network and terrain around Labège, runs the real detection
-pipeline on it and writes ``web/data/sample-segments.geojson`` (flagged as
-sample data). Nothing here comes from OSM or IGN: the segments are fake and
-must not be used to go running.
+pipeline on it and writes the tileset of ``web/data/sample/`` (flagged as
+sample data; needs tippecanoe, ADR 0009). Nothing here comes from OSM or IGN:
+the segments are fake and must not be used to go running.
 
 Usage: ``uv run python scripts/make_sample_data.py``
 """
@@ -19,14 +19,14 @@ import numpy as np
 
 from flat_segments.detect import SegmentKind, detect_all
 from flat_segments.elevation import FunctionDem, sample_stroke
-from flat_segments.export import segments_to_geojson, write_geojson
 from flat_segments.geometry import FloatArray
 from flat_segments.network import RoadClass, Way, build_strokes
 from flat_segments.params import PipelineParams
+from flat_segments.tiles import write_tileset
 
 #: Local origin in Lambert-93 (Labège).
 ORIGIN = np.array([581_376.0, 6_271_316.0])
-OUTPUT = Path(__file__).resolve().parents[1] / "web" / "data" / "sample-segments.geojson"
+OUTPUT = Path(__file__).resolve().parents[1] / "web" / "data" / "sample"
 GENERATED_AT = datetime(2026, 9, 30, tzinfo=UTC)
 ATTRIBUTION = ("Données fictives générées par scripts/make_sample_data.py",)
 
@@ -143,16 +143,13 @@ def network() -> list[Way]:
 
 
 def main() -> None:
-    """Run the pipeline on the synthetic network and write the sample GeoJSON."""
+    """Run the pipeline on the synthetic network and write the sample tileset."""
     params = PipelineParams()
     strokes = build_strokes(network(), params.network)
     dem = FunctionDem(terrain)
     z_raw = {s.id: sample_stroke(s.coords, dem, params.profile) for s in strokes}
     segments = detect_all(strokes, z_raw, params, elevation_source="synthetic")
-    collection = segments_to_geojson(
-        segments, sample=True, generated_at=GENERATED_AT, attribution=ATTRIBUTION
-    )
-    write_geojson(collection, OUTPUT)
+    write_tileset(segments, OUTPUT, sample=True, generated_at=GENERATED_AT, attribution=ATTRIBUTION)
     n_flat = sum(s.kind is SegmentKind.FLAT for s in segments)
     print(f"{len(strokes)} strokes -> {n_flat} flat segments, {len(segments) - n_flat} climbs")
     print(f"written to {OUTPUT}")

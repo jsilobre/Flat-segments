@@ -75,7 +75,8 @@ Chaque étape est une commande de la CLI Typer `flat-segments` :
 | `extract` | extrait OSM `.osm.pbf` + emprise | `data/interim/strokes.parquet` | `osm.py`, `network.py` |
 | `elevation` | strokes + MNT (GeoTIFF/VRT en Lambert-93) | `data/interim/profiles.parquet` | `elevation.py` |
 | `detect` | strokes + profils | `data/processed/segments.parquet` | `profile.py`, `detect.py` |
-| `export` | segments | `web/data/segments.geojson` | `export.py` |
+| `export` | segments | `data/processed/segments.geojson` (inspection) | `export.py` |
+| `export-pmtiles` | un ou plusieurs fichiers de segments | `web/data/segments.pmtiles`, `segments.json`, `ids/` | `tiles.py` (tippecanoe) |
 | `pipeline` | extrait découpé + MNT | les quatre sorties ci-dessus | `pipeline.py` |
 
 Le découpage en quatre étapes permet de régler les seuils de détection
@@ -129,6 +130,7 @@ Les modules :
 | `pipeline.py` | Les quatre étapes sous forme de fonctions, partagées par les commandes | E/S |
 | `departments.py` | Contours des départements (Admin Express), règle du milieu pour rattacher un segment | pur + E/S |
 | `batch.py` | Production par département : étapes avec reprise, état, récapitulatif | E/S |
+| `tiles.py` | Publication en tuiles vectorielles (tippecanoe, tile-join), métadonnées, index des identifiants | E/S |
 | `calibration.py` | Rapport, balayage de paramètres, graphique de profil, fiche de validation | pur + E/S |
 | `cli.py` | CLI Typer, câblage des étapes | E/S |
 
@@ -161,46 +163,70 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
 ### 3.3 Front statique (`web/`)
 
 - `index.html`, `style.css` : une page, sans framework ni étape de build.
-- `app.js` : carte MapLibre GL JS (module ES chargé depuis un CDN par une
-  *import map*, version figée et empreintes SRI), fond vectoriel OpenFreeMap
-  avec repli sur un fond uni, couche des segments, panneau de filtres, liste
-  des résultats, géolocalisation.
-- `filters.js` : module ES **pur** (distance haversine, distance point-ligne,
-  filtrage, tri, état de l'URL), testé avec `node --test` (`web/tests/`,
-  `web/package.json` ne sert qu'aux tests).
+- `app.js` : carte MapLibre GL JS (modules ES chargés depuis un CDN par une
+  *import map*, versions figées et empreintes SRI : `maplibre-gl`, `pmtiles`,
+  `fflate`), fond vectoriel OpenFreeMap avec repli sur un fond uni, panneau de
+  filtres, liste des résultats, géolocalisation.
+- **Données en tuiles vectorielles** ([ADR 0009](adr/0009-pmtiles-tippecanoe.md),
+  [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles`, lu par le
+  protocole `pmtiles://` (requêtes partielles, sans serveur).
+  - Couche `segments` (zooms 12 à 14), avec tous les attributs ; couche
+    `overview` (zooms 8 à 11), allégée, pour la vue d'ensemble.
+  - Les filtres de la carte sont des expressions MapLibre (`mapFilter`), qui
+    sélectionnent exactement ce que sélectionne `matches`.
+  - La **liste des résultats** est construite à partir des tuiles du zoom 12
+    qui couvrent le cercle de recherche, autour de la position ou, à défaut,
+    du centre de la carte. La distance maximale est de 10 km, soit au plus
+    4 × 4 tuiles.
+- `data/segments.json` : attribution, date, paramètres, emprise et nombres du
+  jeu publié. `data/ids/XX.json` : position de chaque segment, pour les liens
+  directs.
+- `data/sample/` : le même trio pour le jeu d'exemple fictif, utilisé quand
+  `data/segments.json` manque.
+- `filters.js` : module ES **pur** (distances, filtrage, expressions de
+  filtre, tri, état de l'URL). `tiles.js` : module **pur** (décodeur de tuiles
+  vectorielles, calcul des tuiles couvrant un cercle, recollage des morceaux
+  d'un segment). Tous deux sont testés avec `node --test` (`web/tests/`, avec
+  une tuile produite par tippecanoe en fixture ; `web/package.json` ne sert
+  qu'aux tests).
 - **Liens directs** : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
-  position et `?kind=climb` affiche les côtes. Le segment d'un lien reste
-  affiché même s'il sort des filtres (une côte à 2,97 % avec un minimum de
-  3 %, par exemple), jusqu'à la fermeture de sa fiche. L'URL suit la sélection, ce qui
-  sert à partager un segment et à la fiche de validation terrain.
+  position et `?kind=climb` affiche les côtes.
+  - La position du segment est lue dans `data/ids/`, puis on lit les tuiles
+    autour d'elle.
+  - Le segment d'un lien reste affiché même s'il sort des filtres (une côte à
+    2,97 % avec un minimum de 3 %, par exemple), jusqu'à la fermeture de sa
+    fiche.
+  - L'URL suit la sélection, ce qui sert à partager un segment et à la fiche
+    de validation terrain.
 - **Publication** : le workflow `.github/workflows/pages.yml` déploie `web/`
   (sans les tests) sur GitHub Pages à chaque modification sur `main`.
-- `data/segments.geojson` : segments réels quand ils existent ;
-  `data/sample-segments.geojson` sinon (données fictives).
 
 ```mermaid
 sequenceDiagram
     actor U as Coureur
     participant B as Navigateur (app.js)
-    participant F as filters.js
+    participant T as tiles.js / filters.js
     participant S as Hébergement statique
 
-    B->>S: GET data/segments.geojson
+    B->>S: GET data/segments.json
     alt 404
-        B->>S: GET data/sample-segments.geojson
+        B->>S: GET data/sample/segments.json
         B->>U: bandeau « données d'exemple »
     end
+    B->>S: GET data/segments.pmtiles (plages d'octets : en-tête, tuiles visibles)
     U->>B: « Me localiser » / clic sur la carte / saisie lat,lon
-    B->>B: navigator.geolocation.getCurrentPosition()
     U->>B: choisit type, longueur min, pente, distance max…
-    B->>F: filterSegments(features, critères, position)
-    F-->>B: segments retenus + distance
-    B->>B: setData(), liste triée (distance ou score)
+    B->>B: filtre de la carte (expression MapLibre)
+    B->>S: tuiles z12 couvrant le cercle de recherche (plages d'octets)
+    B->>T: decodeTile, segmentsFromTiles, filterSegments
+    T-->>B: segments retenus + distance
+    B->>B: liste triée (distance ou score)
     U->>B: clic sur un segment
     B->>U: popup (longueur, pente, revêtement, traversées…)
 ```
 
-Le site est hébergeable sur GitHub Pages tel quel (dossier `web/`).
+Le site est hébergeable sur GitHub Pages tel quel (dossier `web/`), qui
+répond aux requêtes partielles.
 
 ### 3.4 Future API (phase 3)
 
@@ -278,7 +304,7 @@ recalés à l'échelle régionale.
 |---|---|---|
 | **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Pas de 2 m adopté (amendement de l'ADR 0007) |
 | **2.1 Pipeline par département** *(faite, [rapport](phase-2/2.1-departement.md))* | Commandes `department` et `departments` : contour Admin Express élargi de 2 km, MNT limité aux dalles utiles, rattachement au département qui contient le milieu, reprise. Haute-Garonne : 31 min 31 s, 45 341 segments, résultats identiques à ceux du pilote | Volume des PMTiles régionaux par rapport à la limite de 100 Mo de GitHub (étape 2.3) |
-| **2.2 PMTiles et front sur tuiles** | Export PMTiles, tous les attributs à partir du zoom ≈ 12. Le front construit la liste à partir des tuiles chargées autour de la position ; liens directs `?id=` via un petit index (id → position) | Taille de l'index ; tri et filtre de distance sur les seuls segments chargés |
+| **2.2 PMTiles et front sur tuiles** *(faite, [rapport](phase-2/2.2-tuiles.md))* | `export-pmtiles` (détail z12–14, vue d'ensemble z8–11, index des identifiants) ; front sur tuiles (décodeur MVT, liste à partir des tuiles z12, liens directs par index) ; Haute-Garonne publiée | Service des PMTiles par GitHub Pages (gzip) au premier déploiement |
 | **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |
 | **2.4 Production automatisée** | Workflow GitHub Actions, une tâche par département, puis assemblage ; régénération périodique | Limites d'Actions (6 h et ~14 Go de disque par tâche) et limites d'usage de l'IGN |
 | **2.5 France métropolitaine** | 96 départements, PMTiles (1 à 2 Go estimés) sur un stockage d'objets (type Cloudflare R2) | Changement d'hébergement, CORS et requêtes partielles |

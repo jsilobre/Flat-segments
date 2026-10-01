@@ -26,6 +26,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+      - name: Install tippecanoe (PMTiles export, ADR 0009)
+        run: sudo apt-get update -q && sudo apt-get install -y -q tippecanoe
       - name: Install dependencies
         run: uv sync --locked
       - name: Lint

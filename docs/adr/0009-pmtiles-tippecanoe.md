@@ -51,8 +51,10 @@ lignes.
 - Les identifiants de segment restent dans la propriété `id`, car le MVT
   n'accepte que des identifiants numériques. Le front s'en sert via l'option
   `promoteId` de MapLibre.
-- Une vue d'ensemble (zooms 6 à 11, allégée) sera produite à part et fusionnée
-  avec `tile-join`, si le front en a besoin (étape 2.2).
+- Une vue d'ensemble (couche `overview`, zooms 8 à 11, `id`, `kind` et
+  `length_m` seulement, allégée par tippecanoe) est produite à part et
+  fusionnée avec `tile-join` ([étape 2.2](../phase-2/2.2-tuiles.md)). Pour la
+  Haute-Garonne, elle ajoute environ 5 Mo aux 16,8 Mo du détail.
 - Les archives départementales sont fusionnées avec `tile-join`.
 - **GDAL** (via pyogrio, sans dépendance de plus) reste un repli pour un
   export ponctuel, sans allègement ni fusion.
@@ -64,8 +66,8 @@ lignes.
   pilote.
 - Une dépendance système (non Python) s'ajoute pour l'étape d'export en
   PMTiles. Le reste du pipeline et ses tests n'en dépendent pas : les tests de
-  cette étape seront sautés si tippecanoe est absent, et la CI l'installera
-  (étape 2.2).
+  cette étape sont sautés si tippecanoe est absent, et la CI l'installe
+  ([étape 2.2](../phase-2/2.2-tuiles.md)).
 - **Ordre de grandeur des volumes**. L'estimation initiale, extrapolée de la
   zone pilote, était d'environ 150 Mo pour l'ex-Midi-Pyrénées et de 1 à
   2 Go pour la métropole. Elle a été recalée sur la Haute-Garonne complète

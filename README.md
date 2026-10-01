@@ -37,7 +37,7 @@ Déjà en place :
   - lecture OSM avec pyosmium et découpe de l'extrait ;
   - échantillonnage du MNT avec rasterio ;
   - détection, score et déduplication ;
-  - export GeoParquet et GeoJSON.
+  - export GeoParquet, GeoJSON et tuiles vectorielles (PMTiles).
 - **Téléchargements automatisés** : extrait OSM (Geofabrik ou miroir) et dalles
   du MNT LiDAR HD via la Géoplateforme.
 - **Outils de calibrage** : rapport, balayage de paramètres, profil d'un segment,
@@ -45,21 +45,25 @@ Déjà en place :
 - **Front statique** :
   - liens directs vers un segment ;
   - déploiement GitHub Pages par workflow.
-- **Segments réels de la zone pilote** (`web/data/segments.geojson`, 2,5 Mo) :
-  - 778 plats (322 km) et 2266 côtes (497 km) ;
-  - tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN (pas de 2 m) ;
-  - seuils calibrés sur ces données
-    ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
-
+- **Segments réels de la zone pilote**, publiés en phase 1 : 778 plats et 2266
+  côtes, tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN (pas
+  de 2 m), avec des seuils calibrés sur ces données
+  ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
 - **Validation terrain** ([fiche](docs/validation/pilot.md),
   [bilan](docs/validation/README.md#campagne-1--zone-pilote-octobre-2026)) :
   15 segments conformes sur 18 vérifiés, aucune erreur de pente ni de
   traversée.
 
-Prochaine étape, **phase 2** : couvrir toute la France par précalcul
-statique (PMTiles), en commençant par l'ex-Midi-Pyrénées. Voir
+🚧 **Phase 2 en cours : couvrir toute la France par précalcul statique.** Voir
 l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
 [plan](docs/architecture.md#51-plan-de-la-phase-2).
+
+- **Production par département**, avec reprise après interruption
+  ([2.1](docs/phase-2/2.1-departement.md)).
+- **Site sur tuiles vectorielles** (PMTiles) : publication de la
+  **Haute-Garonne**, soit 14 532 plats et 30 809 côtes
+  ([2.2](docs/phase-2/2.2-tuiles.md)).
+- Prochaine étape : l'ex-Midi-Pyrénées en ligne (2.3).
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
@@ -92,8 +96,14 @@ Les données brutes et intermédiaires vont dans `data/` (ignoré par Git). Voir
 ```bash
 uv run flat-segments download-osm   # extrait Geofabrik (MD5) + découpe → data/raw/pilot.osm.pbf
 uv run flat-segments download-dem   # dalles MNT LiDAR HD de l'emprise → data/raw/dem/pilot.vrt
-uv run flat-segments pipeline       # extract + elevation + detect + export → web/data/segments.geojson
+uv run flat-segments pipeline       # extract + elevation + detect + export → data/processed/
+uv run flat-segments export-pmtiles # publication pour le site → web/data/segments.pmtiles (tippecanoe)
 ```
+
+`export-pmtiles` demande [tippecanoe](https://github.com/felt/tippecanoe)
+(`apt install tippecanoe` ou `brew install tippecanoe`). Il accepte plusieurs
+fichiers de segments, par exemple ceux de plusieurs départements :
+`export-pmtiles data/departments/*/segments.parquet`.
 
 Production par département (phase 2) : le traitement reprend après une
 interruption, et le MNT est supprimé une fois utilisé.
@@ -136,21 +146,24 @@ développement) ou avec l'extra `viz` (`uv sync --extra viz`).
 Site statique, sans étape de build :
 
 ```bash
-python -m http.server --directory web 8000
+npx http-server web -p 8000 -c-1
 # puis ouvrir http://localhost:8000
 ```
 
-La page charge `web/data/segments.geojson` s'il existe, sinon le jeu d'exemple
-`web/data/sample-segments.geojson` (données fictives, signalées par un bandeau).
+Il faut un serveur qui accepte les requêtes partielles (`Range`), ce que ne
+fait pas `python -m http.server`. La page lit les tuiles
+`web/data/segments.pmtiles` ; si `web/data/segments.json` manque, elle prend
+le jeu d'exemple `web/data/sample/` (données fictives, signalées par un
+bandeau).
 
 Liens directs : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
 position et `?kind=climb` affiche les côtes. Le workflow *Pages* publie `web/` à
 chaque modification sur `main`. Il faut d'abord activer GitHub Pages dans
 *Settings → Pages → Source : GitHub Actions*.
 
-Régénérer le jeu d'exemple : `uv run python scripts/make_sample_data.py`.
+Régénérer le jeu d'exemple (tippecanoe requis) : `uv run python scripts/make_sample_data.py`.
 
-Tests du filtrage côté navigateur : `cd web && node --test`.
+Tests du filtrage et du décodage des tuiles côté navigateur : `cd web && node --test`.
 
 ## Organisation du dépôt
 

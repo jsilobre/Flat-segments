@@ -1,0 +1,118 @@
+import json
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
+from typer.testing import CliRunner
+
+from flat_segments import cli, tiles
+from flat_segments.detect import Segment, SegmentKind
+from flat_segments.export import OSM_ATTRIBUTION, write_segments
+from flat_segments.pipeline import params_sidecar, run_publish
+from tests.test_export import sample_segments
+
+needs_tippecanoe = pytest.mark.skipif(
+    not tiles.tippecanoe_available(), reason="tippecanoe is not installed"
+)
+
+
+def labege_segments() -> list[Segment]:
+    """Synthetic segments moved to Labège (Lambert-93)."""
+    offset = np.array([581_000.0, 6_271_000.0])
+    segments = sample_segments()
+    return [replace(s, coords=s.coords + offset) for s in segments]
+
+
+def test_tile_properties_have_no_lists_nor_nulls() -> None:
+    segment = replace(labege_segments()[0], name=None, highways=("cycleway", "footway"))
+    props = tiles.tile_properties(segment)
+    assert "name" not in props
+    assert props["highways"] == '["cycleway","footway"]'
+    assert props["fits_targets_m"] == "[200,400,1000]"
+    assert props["kind"] == "flat"
+    assert all(not isinstance(v, (list, tuple, type(None))) for v in props.values())
+
+
+def test_id_index_gives_the_midpoint_of_each_segment(tmp_path: Path) -> None:
+    [segment] = labege_segments()
+    other = replace(segment, id="climb-3fa2b1c9d0e4")
+    (tmp_path / "ids").mkdir()
+    (tmp_path / "ids" / "zz.json").write_text("{}")  # stale file of an older export
+    assert tiles.write_id_index([segment, other], tmp_path / "ids") == 2
+    key = tiles.index_key(segment.id)
+    assert key == segment.id.split("-")[1][:2]
+    entry = json.loads((tmp_path / "ids" / f"{key}.json").read_text())[segment.id]
+    assert entry == pytest.approx([1.53, 43.53], abs=0.02)
+    assert json.loads((tmp_path / "ids" / "3f.json").read_text()) == {"climb-3fa2b1c9d0e4": entry}
+    assert not (tmp_path / "ids" / "zz.json").exists()
+
+
+def test_tileset_metadata() -> None:
+    segments = labege_segments()
+    metadata = tiles.tileset_metadata(
+        segments, generated_at=datetime(2026, 10, 1, tzinfo=UTC), params={"a": 1}
+    )
+    assert metadata["generated_at"] == "2026-10-01T00:00:00Z"
+    assert metadata["sample"] is False
+    assert metadata["attribution"][0] == OSM_ATTRIBUTION
+    assert metadata["counts"] == {"flat": 1, "climb": 0}
+    west, south, east, north = metadata["bounds"]
+    assert west < east
+    assert south < north
+    assert metadata["tiles"]["minzoom"] == 12
+    assert metadata["params"] == {"a": 1}
+
+
+@needs_tippecanoe
+def test_tileset_holds_every_segment_with_its_properties(tmp_path: Path) -> None:
+    import pyogrio  # type: ignore[import-untyped]
+
+    segments = labege_segments()
+    files = tiles.write_tileset(segments, tmp_path)
+    assert files.pmtiles.stat().st_size > 0
+    layers = {name for name, _ in pyogrio.list_layers(files.pmtiles)}
+    assert layers == {"segments", "overview"}
+    detail = pyogrio.read_dataframe(files.pmtiles, layer="segments")
+    assert set(detail["id"]) == {s.id for s in segments}
+    assert json.loads(detail["fits_targets_m"].iloc[0]) == [200, 400, 1000]
+    overview = pyogrio.read_dataframe(files.pmtiles, layer="overview")
+    assert set(overview.columns) - {"geometry", "mvt_id"} == {"id", "kind", "length_m"}
+    assert json.loads(files.metadata.read_text())["counts"]["flat"] == 1
+
+
+def write_run(directory: Path, segments: list[Segment], params: str = "x = 1\n") -> Path:
+    path = directory / "segments.parquet"
+    directory.mkdir(parents=True)
+    write_segments(segments, path)
+    params_sidecar(path).write_text(params)
+    return path
+
+
+def test_publish_refuses_mixed_parameters_and_duplicate_ids(tmp_path: Path) -> None:
+    [segment] = labege_segments()
+    a = write_run(tmp_path / "a", [segment])
+    b = write_run(tmp_path / "b", [replace(segment, id="flat-000000000000")], "x = 2\n")
+    with pytest.raises(ValueError, match="different parameters"):
+        run_publish([a, b], tmp_path / "web")
+    c = write_run(tmp_path / "c", [segment])
+    with pytest.raises(ValueError, match="duplicate"):
+        run_publish([a, c], tmp_path / "web")
+
+
+@needs_tippecanoe
+def test_export_pmtiles_command_merges_departments(tmp_path: Path) -> None:
+    [segment] = labege_segments()
+    climb = replace(
+        segment, id="climb-000000000001", kind=SegmentKind.CLIMB, coords=segment.coords + 900.0
+    )
+    a = write_run(tmp_path / "31", [segment])
+    b = write_run(tmp_path / "81", [climb])
+    out = tmp_path / "web"
+    result = CliRunner().invoke(cli.app, ["export-pmtiles", str(a), str(b), "--out-dir", str(out)])
+    assert result.exit_code == 0, result.output
+    metadata = json.loads((out / "segments.json").read_text())
+    assert metadata["counts"] == {"flat": 1, "climb": 1}
+    assert metadata["params"] == {"x": 1}
+    assert (out / "ids" / "00.json").exists()

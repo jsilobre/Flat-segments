@@ -9,13 +9,17 @@ parameters used by ``detect`` are saved next to its output
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from flat_segments.config import params_to_toml
 from flat_segments.detect import Segment, detect_all
 from flat_segments.params import PipelineParams
+
+if TYPE_CHECKING:
+    from flat_segments.tiles import TilesetFiles
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +31,8 @@ class DataPaths:
     strokes: Path = Path("data/interim/strokes.parquet")
     profiles: Path = Path("data/interim/profiles.parquet")
     segments: Path = Path("data/processed/segments.parquet")
-    geojson: Path = Path("web/data/segments.geojson")
+    geojson: Path = Path("data/processed/segments.geojson")  # for inspection
+    web_data: Path = Path("web/data")  # published tiles (export-pmtiles)
 
 
 def params_sidecar(segments_path: Path) -> Path:
@@ -118,6 +123,41 @@ def run_export(segments: Path, out: Path, *, sample: bool = False) -> int:
         params = tomllib.loads(sidecar.read_text(encoding="utf-8"))
     write_geojson(segments_to_geojson(all_segments, sample=sample, params=params), out)
     return len(all_segments)
+
+
+def run_publish(
+    segments_files: Sequence[Path], out_dir: Path, *, sample: bool = False
+) -> tuple[int, TilesetFiles]:
+    """Publish one or more segments files (pilot, départements) as a tileset.
+
+    The parameters recorded next to each file (``segments.params.toml``) must
+    be identical: a published set says how it was produced.
+
+    Returns:
+        ``(number of segments, files written)``.
+
+    Raises:
+        ValueError: If the files were produced with different parameters or
+            share segment ids.
+        TippecanoeError: If tippecanoe is missing or fails.
+    """
+    from flat_segments.export import read_segments
+    from flat_segments.tiles import write_tileset
+
+    sidecars = {
+        params_sidecar(f).read_text(encoding="utf-8")
+        for f in segments_files
+        if params_sidecar(f).exists()
+    }
+    if len(sidecars) > 1:
+        raise ValueError("segments produced with different parameters cannot be published together")
+    segments = [s for f in segments_files for s in read_segments(f)]
+    ids = [s.id for s in segments]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate segment ids across the files")
+    params = tomllib.loads(sidecars.pop()) if sidecars else None
+    files = write_tileset(segments, out_dir, sample=sample, params=params)
+    return len(segments), files
 
 
 def run_all(

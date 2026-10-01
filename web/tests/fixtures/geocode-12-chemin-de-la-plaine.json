@@ -1,0 +1,94 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     1.54502,
+     43.532791
+    ]
+   },
+   "properties": {
+    "label": "12 Chemin de la Plaine 31670 Labège",
+    "score": 0.8749379990352268,
+    "housenumber": "12",
+    "id": "31254_0345_00012",
+    "banId": "05b1dfa7-d216-4d4f-8826-afdc8618376e",
+    "name": "12 Chemin de la Plaine",
+    "postcode": "31670",
+    "citycode": "31254",
+    "x": 582351.56,
+    "y": 6271496.95,
+    "city": "Labège",
+    "context": "31, Haute-Garonne, Occitanie",
+    "type": "housenumber",
+    "importance": 0.49988,
+    "depcode": "31",
+    "street": "Chemin de la Plaine",
+    "distance": 1249,
+    "_type": "address"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     2.201459,
+     43.959832
+    ]
+   },
+   "properties": {
+    "label": "12 Chemin Plaine de Laborie 81160 Arthès",
+    "score": 0.6190567634824122,
+    "housenumber": "12",
+    "id": "81018_0078_00012",
+    "banId": "5723dae7-2aa4-464e-8f81-cc3968208646",
+    "name": "12 Chemin Plaine de Laborie",
+    "postcode": "81160",
+    "citycode": "81018",
+    "x": 635908.02,
+    "y": 6318194.01,
+    "city": "Arthès",
+    "context": "81, Tarn, Occitanie",
+    "type": "housenumber",
+    "importance": 0.47552,
+    "depcode": "81",
+    "street": "Chemin Plaine de Laborie",
+    "distance": 72021,
+    "_type": "address"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     2.225418,
+     43.528546
+    ]
+   },
+   "properties": {
+    "label": "Chemin de la Plaine 81290 Labruguière",
+    "score": 0.6080675714781145,
+    "id": "81120_0708",
+    "name": "Chemin de la Plaine",
+    "postcode": "81290",
+    "citycode": "81120",
+    "x": 637360.79,
+    "y": 6270248.43,
+    "city": "Labruguière",
+    "context": "81, Tarn, Occitanie",
+    "type": "street",
+    "importance": 0.53193,
+    "depcode": "81",
+    "street": "Chemin de la Plaine",
+    "distance": 56028,
+    "_type": "address"
+   }
+  }
+ ],
+ "query": "12 chemin de la plaine lab"
+}

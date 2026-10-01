@@ -50,9 +50,20 @@
           <button id="locate" type="button">📍 Me localiser</button>
           <button id="place" type="button" aria-pressed="false">✚ Placer sur la carte</button>
         </div>
-        <form id="latlon-form" class="row">
-          <label class="sr-only" for="latlon">Latitude, longitude</label>
-          <input id="latlon" name="latlon" placeholder="43.531, 1.533" inputmode="decimal" />
+        <form id="latlon-form" class="row" autocomplete="off">
+          <label class="sr-only" for="latlon">Adresse, ou latitude et longitude</label>
+          <div class="search">
+            <input
+              id="latlon"
+              name="latlon"
+              placeholder="Adresse, ou 43.531, 1.533"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="suggestions"
+            />
+            <ul id="suggestions" class="suggestions" role="listbox" aria-label="Adresses trouvées" hidden></ul>
+          </div>
           <button type="submit">OK</button>
         </form>
         <p id="position-status" class="hint" aria-live="polite">Aucune position : pas de filtre de distance.</p>

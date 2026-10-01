@@ -18,6 +18,7 @@ import {
   parseUrlState,
   sortResults,
 } from "./filters.js";
+import { geocodeUrl, parseGeocodeResults } from "./geocode.js";
 import { decodeTile, indexKey, normalizeProperties, segmentsFromTiles, tilesCoveringCircle } from "./tiles.js";
 
 // Published tileset, or the fictitious sample when there is none.
@@ -33,6 +34,8 @@ const MAX_RESULTS = 50;
 const COLORS = { flat: "#1f6fb2", climb: "#d4570f" };
 // Radius of the tiles read to open a linked segment around its indexed position.
 const LINK_RADIUS_M = 1500;
+// Pause in the typing before suggesting addresses.
+const SUGGEST_DELAY_MS = 300;
 
 const SURFACE_LABELS = {
   paved: "revêtu (asphalte, béton…)",
@@ -547,15 +550,126 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.placing) setPlacing(false);
 });
 
-$("latlon-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const position = parseLatLon($("latlon").value);
-  if (!position) {
-    $("position-status").textContent = "Format attendu : latitude, longitude (ex. 43.531, 1.533).";
+// Address search: suggestions while typing, the chosen (or first) one on submit.
+const search = { results: [], active: -1, text: "", timer: null, controller: null };
+
+async function geocode(text) {
+  const { lng, lat } = map.getCenter();
+  const url = geocodeUrl(text, [lng, lat]);
+  if (!url) return [];
+  search.controller?.abort();
+  search.controller = new AbortController();
+  const response = await fetch(url, { signal: search.controller.signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return parseGeocodeResults(await response.json());
+}
+
+function showSuggestions(results, text) {
+  search.results = results;
+  search.text = text;
+  search.active = -1;
+  const list = $("suggestions");
+  list.replaceChildren(
+    ...results.map(({ label }, i) => {
+      const item = document.createElement("li");
+      item.id = `suggestion-${i}`;
+      item.setAttribute("role", "option");
+      item.textContent = label;
+      // mousedown, not click: the input must not lose the focus (blur hides the list).
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        chooseAddress(results[i]);
+      });
+      return item;
+    }),
+  );
+  list.hidden = !results.length;
+  $("latlon").setAttribute("aria-expanded", String(!list.hidden));
+  highlight(-1);
+}
+
+function hideSuggestions() {
+  clearTimeout(search.timer);
+  search.controller?.abort();
+  showSuggestions([], "");
+}
+
+function highlight(index) {
+  search.active = index;
+  for (const [i, item] of [...$("suggestions").children].entries()) {
+    item.setAttribute("aria-selected", String(i === index));
+  }
+  if (index >= 0) $("latlon").setAttribute("aria-activedescendant", `suggestion-${index}`);
+  else $("latlon").removeAttribute("aria-activedescendant");
+}
+
+function chooseAddress({ label, position }) {
+  $("latlon").value = label;
+  hideSuggestions();
+  setPosition(position, label);
+  map.flyTo({ center: position, zoom: 14 });
+}
+
+$("latlon").addEventListener("input", () => {
+  const text = $("latlon").value;
+  clearTimeout(search.timer);
+  if (parseLatLon(text) || !geocodeUrl(text)) {
+    hideSuggestions();
     return;
   }
-  setPosition(position, "saisie");
-  map.flyTo({ center: position, zoom: 14 });
+  search.timer = setTimeout(async () => {
+    try {
+      showSuggestions(await geocode(text), text);
+    } catch (error) {
+      if (error.name !== "AbortError") console.warn("Address suggestions unavailable", error);
+    }
+  }, SUGGEST_DELAY_MS);
+});
+
+$("latlon").addEventListener("keydown", (event) => {
+  const count = search.results.length;
+  if (!count) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    // Cycle through the suggestions and back to the typed text (index -1).
+    highlight(((search.active + 1 + step + count + 1) % (count + 1)) - 1);
+  } else if (event.key === "Escape") {
+    hideSuggestions();
+  }
+});
+$("latlon").addEventListener("blur", hideSuggestions);
+
+$("latlon-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("latlon").value;
+  const position = parseLatLon(text);
+  if (position) {
+    hideSuggestions();
+    setPosition(position, "saisie");
+    map.flyTo({ center: position, zoom: 14 });
+    return;
+  }
+  if (!geocodeUrl(text)) {
+    $("position-status").textContent = "Saisissez une adresse, ou latitude, longitude (ex. 43.531, 1.533).";
+    return;
+  }
+  // The highlighted suggestion, or the first one for this text.
+  if (search.text === text && search.results.length) {
+    chooseAddress(search.results[Math.max(0, search.active)]);
+    return;
+  }
+  $("position-status").textContent = "Recherche de l'adresse…";
+  clearTimeout(search.timer); // a pending suggestion request would abort this one
+  try {
+    const [first] = await geocode(text);
+    if (first) chooseAddress(first);
+    else $("position-status").textContent = `Adresse introuvable : ${text}.`;
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    console.warn(error);
+    $("position-status").textContent = "Recherche d'adresse impossible (réseau). Réessayez, ou saisissez latitude, longitude.";
+  }
 });
 
 // --- data loading -------------------------------------------------------------

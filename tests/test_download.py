@@ -215,6 +215,15 @@ def test_download_dem_only_fetches_tiles_touching_the_area(tmp_path: Path) -> No
     assert z[2] == pytest.approx(plane(np.array(1500.0), np.array(2100.0)))
 
 
+def test_snap_bounds_to_the_tile_grid() -> None:
+    assert dl.snap_bounds((576_100.0, 6_265_000.0, 603_900.0, 6_277_999.0), 4000) == (
+        576_000.0,
+        6_264_000.0,
+        604_000.0,
+        6_280_000.0,
+    )
+
+
 def test_default_grid_is_2_m_in_4_km_tiles() -> None:
     [tile, *_] = dl.dem_tiles((0, 0, 8000, 4000), dl.DEM_TILE_SIZE_M, dl.DEM_RESOLUTION_M)
     assert (tile.max_x - tile.min_x, tile.width, tile.height) == (4000, 2000, 2000)

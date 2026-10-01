@@ -215,6 +215,23 @@ def dem_tiles(
     return tiles
 
 
+def snap_bounds(
+    bounds: tuple[float, float, float, float], step: float
+) -> tuple[float, float, float, float]:
+    """Grow Lambert-93 ``bounds`` to multiples of ``step``.
+
+    Tiles then follow one national grid: neighbouring zones get the same tiles
+    (same names), which can be shared.
+    """
+    min_x, min_y, max_x, max_y = bounds
+    return (
+        math.floor(min_x / step) * step,
+        math.floor(min_y / step) * step,
+        math.ceil(max_x / step) * step,
+        math.ceil(max_y / step) * step,
+    )
+
+
 def tiles_touching(tiles: Sequence[DemTile], area: BaseGeometry) -> list[DemTile]:
     """Tiles intersecting a Lambert-93 polygon (e.g. a grown département outline)."""
     import shapely

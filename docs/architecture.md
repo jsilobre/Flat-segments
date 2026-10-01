@@ -150,7 +150,9 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
   filtrage, tri, état de l'URL), testé avec `node --test` (`web/tests/`,
   `web/package.json` ne sert qu'aux tests).
 - **Liens directs** : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
-  position et `?kind=climb` affiche les côtes. L'URL suit la sélection, ce qui
+  position et `?kind=climb` affiche les côtes. Le segment d'un lien reste
+  affiché même s'il sort des filtres (une côte à 2,97 % avec un minimum de
+  3 %, par exemple), jusqu'à la fermeture de sa fiche. L'URL suit la sélection, ce qui
   sert à partager un segment et à la fiche de validation terrain.
 - **Publication** : le workflow `.github/workflows/pages.yml` déploie `web/`
   (sans les tests) sur GitHub Pages à chaque modification sur `main`.

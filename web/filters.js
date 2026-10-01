@@ -77,24 +77,27 @@ export function matches(properties, criteria) {
 
 /**
  * Filter GeoJSON features.
+ * @param pinnedId id of a segment always kept, whatever the criteria and the
+ *   distance (a segment opened by a link stays visible even when it falls just
+ *   outside the filters, e.g. a climb at 2.97 % with a 3 % minimum).
  * @returns {{feature: object, distanceM: number | null}[]} matching features with
  *   their distance to `position` ([lon, lat] or null: no distance filter).
  */
-export function filterSegments(features, criteria, position = null) {
+export function filterSegments(features, criteria, position = null, pinnedId = null) {
   const results = [];
   for (const feature of features) {
-    if (!matches(feature.properties, criteria)) continue;
+    const pinned = pinnedId !== null && feature.properties.id === pinnedId;
+    if (!pinned && !matches(feature.properties, criteria)) continue;
     let distanceM = null;
     if (position) {
       distanceM = distanceToLineMeters(position, feature.geometry.coordinates);
-      if (distanceM > criteria.maxDistanceM) continue;
+      if (!pinned && distanceM > criteria.maxDistanceM) continue;
     }
     results.push({ feature, distanceM });
   }
   return results;
 }
 
-/** Sort results in place by "distance" (nearest first) or "score" (best first). */
 export function sortResults(results, sortBy) {
   const byScore = (a, b) => b.feature.properties.score - a.feature.properties.score;
   if (sortBy === "distance") {

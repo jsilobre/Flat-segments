@@ -86,10 +86,21 @@ export function matches(properties, criteria) {
 }
 
 /**
+ * MapLibre expression true for the segments whose id is in `ids`.
+ * `match` looks the id up in a table, where `in` would scan the whole list.
+ */
+export function idsFilter(ids) {
+  const labels = [...new Set(ids)];
+  return labels.length ? ["match", ["get", "id"], labels, true, false] : ["literal", false];
+}
+
+/**
  * MapLibre filter expression equivalent to `matches` (map layer of the tiles).
  * @param pinnedId id of a segment always shown (see filterSegments).
+ * @param ids if given, only these segments are shown (the result list, which
+ *   holds the distance limit that an expression cannot compute).
  */
-export function mapFilter(criteria, pinnedId = null) {
+export function mapFilter(criteria, pinnedId = null, ids = null) {
   const get = (key) => ["get", key];
   const conditions = [
     ["==", get("kind"), criteria.kind],
@@ -103,13 +114,40 @@ export function mapFilter(criteria, pinnedId = null) {
     conditions.push([">=", get("grade_mean_pct"), criteria.minMeanGradePct]);
     conditions.push(["<=", get("grade_mean_pct"), criteria.maxMeanGradePct]);
   }
+  if (ids !== null) conditions.push(idsFilter(ids));
   const filter = ["all", ...conditions];
   return pinnedId === null ? filter : ["any", ["==", get("id"), pinnedId], filter];
 }
 
-/** Filter of the overview layer (low zooms): only the kind and length are there. */
-export function overviewFilter(criteria) {
-  return ["all", ["==", ["get", "kind"], criteria.kind], [">=", ["get", "length_m"], criteria.minLengthM]];
+/** Filter of the overview layer (low zooms): only the kind, length and id are there. */
+export function overviewFilter(criteria, ids = null) {
+  const filter = ["all", ["==", ["get", "kind"], criteria.kind], [">=", ["get", "length_m"], criteria.minLengthM]];
+  if (ids !== null) filter.push(idsFilter(ids));
+  return filter;
+}
+
+/**
+ * Circle of `radiusM` metres around [lon, lat], as a GeoJSON polygon of
+ * `steps` sides (points at the exact great-circle distance).
+ */
+export function circlePolygon([lon, lat], radiusM, steps = 64) {
+  const angular = radiusM / EARTH_RADIUS_M;
+  const lat1 = toRad(lat);
+  const ring = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const bearing = (2 * Math.PI * (i % steps)) / steps;
+    const lat2 = Math.asin(
+      Math.sin(lat1) * Math.cos(angular) + Math.cos(lat1) * Math.sin(angular) * Math.cos(bearing),
+    );
+    const lon2 =
+      toRad(lon) +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angular) * Math.cos(lat1),
+        Math.cos(angular) - Math.sin(lat1) * Math.sin(lat2),
+      );
+    ring.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+  }
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
 }
 
 /**

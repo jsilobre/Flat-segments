@@ -1,11 +1,12 @@
-// Map page: reads precomputed segments from vector tiles (PMTiles), filters
-// them on the map (MapLibre expressions) and builds the result list from the
-// tiles around the search point (filters.js, tiles.js). No build step.
+// Map page: reads precomputed segments from vector tiles (PMTiles), builds the
+// result list from the tiles around the search point (filters.js, tiles.js)
+// and shows on the map only the segments of that list. No build step.
 import * as maplibregl from "maplibre-gl";
 import { PMTiles, Protocol } from "pmtiles";
 
 import {
   buildUrlSearch,
+  circlePolygon,
   DEFAULT_CRITERIA,
   featuresBounds,
   filterSegments,
@@ -57,6 +58,7 @@ const state = {
   archive: null, // PMTiles
   tiles: new Map(), // "z/x/y" -> Promise of a decoded tile (or null)
   results: [],
+  searchArea: null, // {center, radiusM} of the latest result query
   query: 0, // id of the latest result query (older answers are ignored)
   missingTiles: 0, // tiles of the latest query that could not be read
   position: null,
@@ -153,6 +155,14 @@ const SEGMENT_LAYERS = ["segments", "overview"];
 function addDataLayers() {
   styleReady = true;
   map.addSource("position", { type: "geojson", data: emptyCollection() });
+  map.addSource("search-area", { type: "geojson", data: emptyCollection() });
+  // Below the segments, which are inserted before the position layer.
+  map.addLayer({
+    id: "search-area",
+    type: "line",
+    source: "search-area",
+    paint: { "line-color": "#4a4a4a", "line-width": 1.5, "line-opacity": 0.7, "line-dasharray": [3, 2] },
+  });
   if (state.archive) addSegmentLayers();
   map.addLayer({
     id: "position",
@@ -286,12 +296,17 @@ function searchCenter() {
 
 // --- state updates ------------------------------------------------------------
 
+/**
+ * Map filters: the criteria, and the ids of the result list, which hold the
+ * distance limit (an expression cannot measure the distance to a line).
+ */
 function updateMapFilters() {
   if (!map.getLayer("segments")) return;
-  const filter = mapFilter(state.criteria, state.pinnedId);
+  const ids = state.results.map((r) => r.feature.properties.id);
+  const filter = mapFilter(state.criteria, state.pinnedId, ids);
   map.setFilter("segments", filter);
   map.setFilter("segments-casing", filter);
-  map.setFilter("overview", overviewFilter(state.criteria));
+  map.setFilter("overview", overviewFilter(state.criteria, ids));
 }
 
 function applyFilters() {
@@ -311,6 +326,8 @@ async function refreshResults() {
     state.sortBy,
   );
   state.missingTiles = failed;
+  state.searchArea = { center, radiusM: state.criteria.maxDistanceM };
+  updateMapFilters();
   render();
 }
 
@@ -361,6 +378,11 @@ function render() {
         ? { type: "Feature", geometry: { type: "Point", coordinates: state.position }, properties: {} }
         : emptyCollection(),
     );
+  }
+  const area = map.getSource("search-area");
+  if (area) {
+    const { center, radiusM } = state.searchArea ?? {};
+    area.setData(center ? circlePolygon(center, radiusM) : emptyCollection());
   }
   renderResults();
 }

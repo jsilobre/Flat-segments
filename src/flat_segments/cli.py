@@ -17,7 +17,13 @@ from flat_segments import __version__
 from flat_segments import pipeline as steps
 from flat_segments.config import ConfigError, load_params, params_to_toml
 from flat_segments.detect import Segment, SegmentKind
-from flat_segments.download import GEOFABRIK_URL, WMS_LAYER, WMS_URL
+from flat_segments.download import (
+    DEM_RESOLUTION_M,
+    DEM_TILE_SIZE_M,
+    GEOFABRIK_URL,
+    WMS_LAYER,
+    WMS_URL,
+)
 from flat_segments.params import PILOT_BBOX_WGS84, PipelineParams
 
 PATHS = steps.DataPaths()
@@ -231,8 +237,8 @@ def download_dem(
     out_dir: Annotated[
         Path, typer.Option(help="Output folder.", file_okay=False)
     ] = PATHS.dem.parent,
-    tile_size_m: Annotated[float, typer.Option(help="Tile size (metres).")] = 2000.0,
-    resolution_m: Annotated[float, typer.Option(help="Pixel size (metres).")] = 1.0,
+    tile_size_m: Annotated[float, typer.Option(help="Tile size (metres).")] = DEM_TILE_SIZE_M,
+    resolution_m: Annotated[float, typer.Option(help="Pixel size (metres).")] = DEM_RESOLUTION_M,
     wms_url: Annotated[str, typer.Option(help="WMS endpoint.")] = WMS_URL,
     layer: Annotated[str, typer.Option(help="WMS elevation layer.")] = WMS_LAYER,
     force: Annotated[bool, typer.Option(help="Download tiles already on disk.")] = False,
@@ -287,6 +293,26 @@ def report(
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")
         typer.echo(f"report -> {out}")
+
+
+@app.command()
+def compare(
+    a: Annotated[Path, typer.Argument(help="Reference segments GeoParquet.", exists=True)],
+    b: Annotated[Path, typer.Argument(help="Segments GeoParquet to compare.", exists=True)],
+    buffer_m: Annotated[float, typer.Option(help="Distance under which a point matches.")] = 10.0,
+    missing: Annotated[bool, typer.Option(help="List the ids of A missing in B.")] = False,
+) -> None:
+    """Compare two segments files: counts, km, overlap in both directions."""
+    from flat_segments.calibration import compare as compare_runs
+    from flat_segments.calibration import format_comparison
+    from flat_segments.export import read_segments
+
+    rows = compare_runs(read_segments(a), read_segments(b), buffer_m)
+    typer.echo(format_comparison(rows, "A", "B"), nl=False)
+    if missing:
+        for row in rows:
+            for segment_id in row.missing_in_b:
+                typer.echo(segment_id)
 
 
 @app.command()

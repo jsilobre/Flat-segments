@@ -28,7 +28,7 @@ from xml.sax.saxutils import escape
 import numpy as np
 
 from flat_segments import __version__
-from flat_segments.elevation import SOURCE_TAG, raster_source
+from flat_segments.elevation import SOURCE_TAG
 from flat_segments.geometry import FloatArray
 from flat_segments.params import WORK_CRS
 
@@ -45,6 +45,11 @@ WMS_LAYER_LIDAR_HD: Final = "IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.L
 WMS_LAYER_RGE_ALTI: Final = "ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES"
 WMS_LAYER: Final = WMS_LAYER_LIDAR_HD
 WMS_FORMAT: Final = "image/x-bil;bits=32"
+# Default extraction grid: 2 m pixels in 4 km tiles (2000 x 2000 px, 16 MB per
+# request). As accurate as 1 m for the segments, 3.5 times faster to download
+# (docs/phase-2/2.0-mesures.md, ADR 0007).
+DEM_RESOLUTION_M: Final = 2.0
+DEM_TILE_SIZE_M: Final = 4000.0
 # Value of ``elevation_source`` for each known layer (docs/data-model.md).
 LAYER_SOURCES: Final = {WMS_LAYER_LIDAR_HD: "lidar_hd", WMS_LAYER_RGE_ALTI: "rge_alti_wms"}
 DEM_NODATA: Final = -99999.0
@@ -344,13 +349,26 @@ def build_vrt(tiles: list[Path], vrt_path: Path, source: str | None = None) -> P
     return vrt_path
 
 
+def _tile_is_current(path: Path, tile: DemTile, source: str) -> bool:
+    """Whether ``path`` already holds ``tile`` (same box, size and source)."""
+    import rasterio
+
+    if not path.exists():
+        return False
+    with rasterio.open(path) as ds:
+        same_grid = (ds.width, ds.height) == (tile.width, tile.height) and np.allclose(
+            tuple(ds.bounds), (tile.min_x, tile.min_y, tile.max_x, tile.max_y)
+        )
+        return same_grid and ds.tags().get(SOURCE_TAG) == source
+
+
 def download_dem(
     bounds: tuple[float, float, float, float],
     out_dir: Path,
     opener: Opener = urlopen,
     *,
-    tile_size_m: float = 2000.0,
-    resolution_m: float = 1.0,
+    tile_size_m: float = DEM_TILE_SIZE_M,
+    resolution_m: float = DEM_RESOLUTION_M,
     base_url: str = WMS_URL,
     layer: str = WMS_LAYER,
     vrt_name: str = "pilot.vrt",
@@ -361,8 +379,8 @@ def download_dem(
 ) -> Path:
     """Download DEM tiles over Lambert-93 ``bounds`` and assemble them in a VRT.
 
-    Tiles already on disk from the same layer are kept (the download can be
-    resumed) unless ``force`` is set. Tiles and VRT are tagged with the
+    Tiles already on disk from the same layer and the same grid are kept (the
+    download can be resumed) unless ``force`` is set. Tiles and VRT are tagged with the
     layer's ``elevation_source``.
 
     Returns:
@@ -373,7 +391,7 @@ def download_dem(
     paths = []
     for index, tile in enumerate(tiles, start=1):
         path = out_dir / "tiles" / tile.name
-        if force or not path.exists() or raster_source(path) != source:
+        if force or not _tile_is_current(path, tile, source):
             url = wms_getmap_url(tile, base_url=base_url, layer=layer)
             data = fetch_bytes(
                 url, opener, retries=retries, transient_codes=WMS_TRANSIENT_CODES, sleep=sleep

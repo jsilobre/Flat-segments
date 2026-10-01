@@ -94,6 +94,7 @@ GeoJSON : un jeu publié dit toujours comment il a été produit.
 |---|---|
 | `report` | Résumé d'un fichier de segments : nombres, longueurs, longueurs cibles, traversées, revêtements, *flags* |
 | `sweep` | Relance la détection pour plusieurs valeurs d'un paramètre et compare les résultats |
+| `compare` | Compare deux fichiers de segments (deux MNT, deux réglages, deux passages) : nombres, km, part des km de chacun retrouvée dans l'autre à 10 m près, segments manquants |
 | `inspect` | Profil brut / lissé et pente locale autour d'un segment (PNG, matplotlib) |
 | `validation-sheet` | Échantillon représentatif de segments sous forme de fiche terrain à remplir ([`validation/`](validation/README.md)) |
 | `config` | Affiche les paramètres effectifs en TOML |
@@ -224,7 +225,7 @@ flowchart TD
     B -->|"reprojection EPSG:2154"| C["Ways en Lambert-93"]
     C -->|"découpage aux nœuds partagés<br/>chaînage par continuité"| D["Strokes<br/>+ tronçons OSM + événements"]
     D -->|"rééchantillonnage tous les 5 m"| E["Points (x, y)"]
-    F["MNT LiDAR HD, 1 m"] -->|bilinéaire| G["z brut"]
+    F["MNT LiDAR HD, 2 m"] -->|bilinéaire| G["z brut"]
     E --> G
     G -->|"ponts/tunnels : interpolation<br/>trous courts : interpolation<br/>médiane + gaussienne"| H["Profil lissé + pente locale"]
     H -->|"fenêtre glissante<br/>critères plat / côte"| I["Fenêtres valides"]
@@ -257,7 +258,7 @@ recalés à l'échelle régionale.
 
 | Étape | Contenu | Point à vérifier |
 |---|---|---|
-| **2.0 Mesures sur le pilote** | MNT au pas de 2 m au lieu de 1 m (volume divisé par 4) : écart sur les plats et les côtes, comme dans l'ADR 0007. Choix de l'outil de génération des PMTiles | Écart acceptable à 2 m ? Outil Python ou binaire (tippecanoe, planetiler) ? |
+| **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Pas de 2 m adopté (amendement de l'ADR 0007) |
 | **2.1 Pipeline par département** | Commande de traitement d'une liste de zones (contour du département), MNT téléchargé puis supprimé dalle par dalle, reprise après erreur, un `segments.parquet` par département | Disque et durée d'un département (≈ 6000 km², 2 à 3 h de MNT estimées) |
 | **2.2 PMTiles et front sur tuiles** | Export PMTiles, tous les attributs à partir du zoom ≈ 12. Le front construit la liste à partir des tuiles chargées autour de la position ; liens directs `?id=` via un petit index (id → position) | Taille de l'index ; tri et filtre de distance sur les seuls segments chargés |
 | **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |

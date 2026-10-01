@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from flat_segments import calibration as cal
@@ -45,6 +46,24 @@ def test_summarize_counts_by_kind() -> None:
     assert "| flat | 5 |" in text  # 3 flat strokes + the flat parts before and after the hill
     assert "| climb | 1 |" in text
     assert "| 1000 |" in text
+
+
+def test_compare_measures_overlap_both_ways() -> None:
+    segments, _, _ = dataset()
+    flats = [s for s in segments if s.kind is SegmentKind.FLAT]
+    assert len(flats) >= 2
+    moved = replace(flats[0], id="flat-moved", coords=flats[0].coords + np.array([0.0, 5.0]))
+    far = replace(flats[1], id="flat-far", coords=flats[1].coords + np.array([0.0, 5000.0]))
+    rows = cal.compare(flats, [moved, far], buffer_m=10.0)
+    flat = next(r for r in rows if r.kind is SegmentKind.FLAT)
+    assert flat.n_a == len(flats)
+    assert flat.n_b == 2
+    assert flat.a_in_b == pytest.approx(flats[0].length_m / sum(s.length_m for s in flats))
+    assert flat.b_in_a == pytest.approx(moved.length_m / (moved.length_m + far.length_m))
+    assert set(flat.missing_in_b) == {s.id for s in flats[1:]}
+    assert cal.compare(flats, flats)[0].a_in_b == pytest.approx(1.0)
+    table = cal.format_comparison(rows, "1 m", "2 m")
+    assert "km of 1 m found in 2 m" in table.splitlines()[0]
 
 
 def test_sweep_reruns_detection() -> None:

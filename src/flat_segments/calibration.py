@@ -4,6 +4,8 @@ These help tune the thresholds of docs/algorithm.md on real data (phase 1):
 
 * :func:`summarize` describes a set of segments (Markdown);
 * :func:`sweep` reruns detection for several values of one parameter;
+* :func:`compare` measures how much two sets of segments overlap (two DEMs,
+  two parameter sets, two runs);
 * :func:`plot_segment` draws the elevation and grade profile around a segment;
 * :func:`validation_sheet` produces the field validation table (in French,
   like the rest of the user documentation).
@@ -23,7 +25,7 @@ import numpy as np
 
 from flat_segments.config import ConfigError, apply_overrides
 from flat_segments.detect import Segment, SegmentKind, detect_all
-from flat_segments.geometry import FloatArray
+from flat_segments.geometry import FloatArray, bbox, point_polyline_distances, resample
 from flat_segments.network import EventKind, Stroke
 from flat_segments.params import PipelineParams
 from flat_segments.profile import Profile
@@ -82,6 +84,107 @@ def summarize(segments: Sequence[Segment]) -> str:
         flags = Counter(f for s in items for f in s.quality_flags)
         if flags:
             lines += ["", *_table(("quality flag", "segments"), flags.most_common())]
+    return "\n".join(lines) + "\n"
+
+
+# --- comparison of two runs ---------------------------------------------------
+
+
+def covered_shares(
+    segments: Sequence[Segment], others: Sequence[Segment], buffer_m: float, step: float
+) -> list[float]:
+    """Share of each segment lying within ``buffer_m`` of a segment of ``others``.
+
+    Each segment is resampled every ``step`` metres; the share is the fraction
+    of its points close to any of ``others`` (all kinds mixed: filter first).
+    """
+    boxes = np.array([bbox(o.coords) for o in others]).reshape(-1, 4)
+    shares = []
+    for segment in segments:
+        _, points = resample(segment.coords, step)
+        min_x, min_y, max_x, max_y = bbox(segment.coords)
+        near = np.flatnonzero(
+            (boxes[:, 0] <= max_x + buffer_m)
+            & (boxes[:, 2] >= min_x - buffer_m)
+            & (boxes[:, 1] <= max_y + buffer_m)
+            & (boxes[:, 3] >= min_y - buffer_m)
+        )
+        covered = np.zeros(len(points), dtype=bool)
+        for k in near:
+            covered |= point_polyline_distances(points, others[int(k)].coords) <= buffer_m
+        shares.append(float(covered.mean()))
+    return shares
+
+
+@dataclass(frozen=True, slots=True)
+class KindComparison:
+    """Overlap of two runs for one kind of segment."""
+
+    kind: SegmentKind
+    n_a: int
+    km_a: float
+    n_b: int
+    km_b: float
+    a_in_b: float  # share of the length of A found in B
+    b_in_a: float
+    missing_in_b: tuple[str, ...]  # ids of A mostly (> 50 %) absent from B
+
+
+def _weighted_share(segments: Sequence[Segment], shares: Sequence[float]) -> float:
+    total = sum(s.length_m for s in segments)
+    return (
+        sum(s.length_m * c for s, c in zip(segments, shares, strict=True)) / total if total else 1.0
+    )
+
+
+def compare(
+    a: Sequence[Segment], b: Sequence[Segment], buffer_m: float = 10.0, step: float = 5.0
+) -> list[KindComparison]:
+    """Compare two sets of segments kind by kind (length-weighted overlap)."""
+    rows = []
+    for kind in SegmentKind:
+        ka = [s for s in a if s.kind is kind]
+        kb = [s for s in b if s.kind is kind]
+        shares_a = covered_shares(ka, kb, buffer_m, step)
+        shares_b = covered_shares(kb, ka, buffer_m, step)
+        rows.append(
+            KindComparison(
+                kind=kind,
+                n_a=len(ka),
+                km_a=sum(s.length_m for s in ka) / 1000,
+                n_b=len(kb),
+                km_b=sum(s.length_m for s in kb) / 1000,
+                a_in_b=_weighted_share(ka, shares_a),
+                b_in_a=_weighted_share(kb, shares_b),
+                missing_in_b=tuple(s.id for s, c in zip(ka, shares_a, strict=True) if c < 0.5),
+            )
+        )
+    return rows
+
+
+def format_comparison(rows: Sequence[KindComparison], label_a: str, label_b: str) -> str:
+    """Markdown table of a comparison."""
+    lines = _table(
+        (
+            "kind",
+            f"{label_a}: segments (km)",
+            f"{label_b}: segments (km)",
+            f"km of {label_a} found in {label_b}",
+            f"km of {label_b} found in {label_a}",
+            f"segments of {label_a} missing in {label_b}",
+        ),
+        (
+            (
+                r.kind.value,
+                f"{r.n_a} ({r.km_a:.1f})",
+                f"{r.n_b} ({r.km_b:.1f})",
+                f"{100 * r.a_in_b:.0f} %",
+                f"{100 * r.b_in_a:.0f} %",
+                len(r.missing_in_b),
+            )
+            for r in rows
+        ),
+    )
     return "\n".join(lines) + "\n"
 
 

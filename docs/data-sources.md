@@ -128,7 +128,7 @@ incapable : une seule maille couvre 15 % du segment.
    ```
 
    La commande découpe l'emprise (convertie en Lambert-93, arrondie au km) en
-   dalles de 2 km au plus. Pour chacune, elle demande l'image d'altitude au
+   dalles de 4 km au plus. Pour chacune, elle demande l'image d'altitude au
    service WMS raster de la
    [Géoplateforme](https://geoservices.ign.fr/services-geoplateforme-diffusion).
    Réglages vérifiés avec `GetCapabilities` le 30/09/2026 :
@@ -140,15 +140,15 @@ incapable : une seule maille couvre 15 % du segment.
    | Format | `image/x-bil;bits=32` : flottants 32 bits bruts, **petit-boutiste** (*little-endian*) |
    | Version | WMS 1.3.0, `CRS=EPSG:2154`, `STYLES` vide (style `normal` : valeurs brutes) |
    | Taille max d'une image | 5010 × 5010 pixels (`MaxWidth`, `MaxHeight`) |
-   | Taille d'une dalle | 2000 × 2000 pixels au pas de 1 m, soit 16 Mo par requête |
+   | Taille d'une dalle (défaut) | 2000 × 2000 pixels au pas de **2 m** (4 km), soit 16 Mo par requête ([ADR 0007](adr/0007-altitude-lidar-hd.md), amendement du 01/10/2026) |
 
    Chaque dalle est enregistrée en GeoTIFF compressé dans
    `data/raw/dem/tiles/`. Les dalles sont ensuite assemblées dans la mosaïque
    virtuelle `data/raw/dem/pilot.vrt`, dont les chemins sont relatifs.
 
    - **Reprise** : on peut relancer la commande après une interruption. Les
-     dalles déjà présentes sont gardées si elles viennent de la même couche,
-     sinon elles sont retéléchargées.
+     dalles déjà présentes sont gardées si elles viennent de la même couche
+     et de la même grille (emprise, taille), sinon elles sont retéléchargées.
    - **Source** : les dalles et le VRT portent la métadonnée
      `ELEVATION_SOURCE` (`lidar_hd`, `rge_alti_wms`). L'étape `elevation` la
      relit, et `--source` permet de la forcer.
@@ -242,7 +242,8 @@ qui incluent arbres et bâtiments.
 | PBF Midi-Pyrénées | 412 Mo (extrait du 29/09/2026) ; environ 10 min de téléchargement | `data/raw/` |
 | PBF zone pilote (découpé) | 1,5 Mo : 13 934 voies `highway=*`, 93 764 nœuds | `data/raw/pilot.osm.pbf` |
 | Archive RGE ALTI 1 m, département 31 | 6,8 Go (GeoTIFF, deux volumes `.7z`) | repli manuel, `data/raw/dem/` |
-| MNT LiDAR HD zone pilote | 28 km × 13 km : 98 dalles WMS de 2 km, 1,5 Go transférés (float32), **681 Mo** en GeoTIFF compressé ; environ 9 min de téléchargement | `data/raw/dem/` ; le VRT ne recopie rien |
+| MNT LiDAR HD zone pilote, 2 m (défaut) | 28 km × 13 km : 28 dalles WMS de 4 km, **182 Mo** en GeoTIFF compressé ; environ 2 min 30 de téléchargement | `data/raw/dem/` ; le VRT ne recopie rien |
+| MNT LiDAR HD zone pilote, 1 m | 98 dalles WMS de 2 km, 1,5 Go transférés (float32), 681 Mo en GeoTIFF compressé ; environ 9 min de téléchargement | ancien réglage (phase 1) |
 | RGE ALTI par WMS, zone pilote | 109 Mo en GeoTIFF compressé (valeurs en marches d'escalier, très compressibles) | comparaison seulement |
 | `strokes.parquet` / `profiles.parquet` (pilote) | 2,5 Mo / 3,1 Mo : 9145 strokes, 1616 km de voies | `data/interim/` |
 | `segments.geojson` (pilote) | 2,5 Mo pour environ 3000 segments | `web/data/` ; PMTiles au-delà de ~ 10 Mo |

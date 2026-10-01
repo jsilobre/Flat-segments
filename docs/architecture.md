@@ -166,18 +166,31 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
 - `app.js` : carte MapLibre GL JS (modules ES chargés depuis un CDN par une
   *import map*, versions figées et empreintes SRI : `maplibre-gl`, `pmtiles`,
   `fflate`), fond vectoriel OpenFreeMap avec repli sur un fond uni, panneau de
-  filtres, liste des résultats, géolocalisation.
+  filtres, liste des résultats.
+- **Position** :
+  - géolocalisation de l'appareil ;
+  - point placé sur la carte : bouton « Placer sur la carte », puis un clic.
+    Un clic sans ce bouton ne déplace pas le point ; on peut aussi le faire
+    glisser ;
+  - saisie, dans un même champ, de « latitude, longitude » ou d'une adresse,
+    avec suggestions pendant la frappe (géocodeur de l'IGN,
+    [ADR 0010](adr/0010-geocodage-ign.md), fonctions pures dans
+    `geocode.js`).
 - **Données en tuiles vectorielles** ([ADR 0009](adr/0009-pmtiles-tippecanoe.md),
   [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles`, lu par le
   protocole `pmtiles://` (requêtes partielles, sans serveur).
   - Couche `segments` (zooms 12 à 14), avec tous les attributs ; couche
     `overview` (zooms 8 à 11), allégée, pour la vue d'ensemble.
-  - Les filtres de la carte sont des expressions MapLibre (`mapFilter`), qui
-    sélectionnent exactement ce que sélectionne `matches`.
   - La **liste des résultats** est construite à partir des tuiles du zoom 12
     qui couvrent le cercle de recherche, autour de la position ou, à défaut,
     du centre de la carte. La distance maximale est de 10 km, soit au plus
     4 × 4 tuiles.
+  - La **carte** ne montre que les segments de la liste, et trace le cercle
+    de recherche en pointillés. Ses filtres sont des expressions MapLibre
+    (`mapFilter`) : les critères, qui sélectionnent exactement ce que
+    sélectionne `matches`, et les identifiants de la liste, qui portent la
+    limite de distance (une expression ne sait pas mesurer la distance à une
+    ligne).
 - `data/segments.json` : attribution, date, paramètres, emprise et nombres du
   jeu publié. `data/ids/XX.json` : position de chaque segment, pour les liens
   directs.
@@ -207,6 +220,7 @@ sequenceDiagram
     participant B as Navigateur (app.js)
     participant T as tiles.js / filters.js
     participant S as Hébergement statique
+    participant G as Géocodeur IGN
 
     B->>S: GET data/segments.json
     alt 404
@@ -214,13 +228,17 @@ sequenceDiagram
         B->>U: bandeau « données d'exemple »
     end
     B->>S: GET data/segments.pmtiles (plages d'octets : en-tête, tuiles visibles)
-    U->>B: « Me localiser » / clic sur la carte / saisie lat,lon
+    U->>B: « Me localiser » / « Placer sur la carte » + clic / saisie lat,lon ou adresse
+    opt adresse
+        B->>G: recherche (suggestions)
+        G-->>B: adresses et positions
+    end
     U->>B: choisit type, longueur min, pente, distance max…
-    B->>B: filtre de la carte (expression MapLibre)
     B->>S: tuiles z12 couvrant le cercle de recherche (plages d'octets)
     B->>T: decodeTile, segmentsFromTiles, filterSegments
     T-->>B: segments retenus + distance
     B->>B: liste triée (distance ou score)
+    B->>B: filtre de la carte (critères + identifiants de la liste), cercle
     U->>B: clic sur un segment
     B->>U: popup (longueur, pente, revêtement, traversées…)
 ```

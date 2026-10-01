@@ -3,7 +3,8 @@
 **Trouver, près de chez soi, les bouts de chemin parfaits pour une séance de course.**
 
 `flat-segments` repère des tronçons courts exploitables pour l'entraînement
-autour d'une position GPS (saisie à la main ou fournie par l'appareil) :
+autour d'une position (adresse, coordonnées GPS, point placé sur la carte ou
+position de l'appareil) :
 
 1. **Segments plats et courts** pour le fractionné et le travail d'allure :
    longueurs cibles 200 m, 400 m et 1 km (paramétrables), pente maximale faible.
@@ -194,5 +195,7 @@ data/                 données téléchargées et produites (non versionné)
   © les contributeurs d'OpenStreetMap.
 - **Altitudes** : IGN – MNT LiDAR HD (RGE ALTI® en repli), [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
 - **Fond de carte** : [OpenFreeMap](https://openfreemap.org/), données © OpenStreetMap.
+- **Recherche d'adresse** : service de géocodage de la Géoplateforme IGN
+  (Base Adresse Nationale, [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/)).
 
-Ces mentions sont aussi affichées sur la carte du site.
+Ces mentions, sauf la dernière, sont aussi affichées sur la carte du site.

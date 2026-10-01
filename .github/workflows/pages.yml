@@ -33,7 +33,7 @@ jobs:
       - name: Assemble the site (without tests)
         run: |
           mkdir -p _site
-          cp web/index.html web/app.js web/filters.js web/tiles.js web/style.css _site/
+          cp web/index.html web/app.js web/filters.js web/geocode.js web/tiles.js web/style.css _site/
           cp -r web/data _site/data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -1,11 +1,12 @@
-// Map page: reads precomputed segments from vector tiles (PMTiles), filters
-// them on the map (MapLibre expressions) and builds the result list from the
-// tiles around the search point (filters.js, tiles.js). No build step.
+// Map page: reads precomputed segments from vector tiles (PMTiles), builds the
+// result list from the tiles around the search point (filters.js, tiles.js)
+// and shows on the map only the segments of that list. No build step.
 import * as maplibregl from "maplibre-gl";
 import { PMTiles, Protocol } from "pmtiles";
 
 import {
   buildUrlSearch,
+  circlePolygon,
   DEFAULT_CRITERIA,
   featuresBounds,
   filterSegments,
@@ -17,6 +18,7 @@ import {
   parseUrlState,
   sortResults,
 } from "./filters.js";
+import { geocodeUrl, parseGeocodeResults } from "./geocode.js";
 import { decodeTile, indexKey, normalizeProperties, segmentsFromTiles, tilesCoveringCircle } from "./tiles.js";
 
 // Published tileset, or the fictitious sample when there is none.
@@ -32,6 +34,8 @@ const MAX_RESULTS = 50;
 const COLORS = { flat: "#1f6fb2", climb: "#d4570f" };
 // Radius of the tiles read to open a linked segment around its indexed position.
 const LINK_RADIUS_M = 1500;
+// Pause in the typing before suggesting addresses.
+const SUGGEST_DELAY_MS = 300;
 
 const SURFACE_LABELS = {
   paved: "revêtu (asphalte, béton…)",
@@ -57,13 +61,16 @@ const state = {
   archive: null, // PMTiles
   tiles: new Map(), // "z/x/y" -> Promise of a decoded tile (or null)
   results: [],
+  searchArea: null, // {center, radiusM} of the latest result query
   query: 0, // id of the latest result query (older answers are ignored)
   missingTiles: 0, // tiles of the latest query that could not be read
   position: null,
+  positionLabel: "", // how the position was given
   criteria: { ...DEFAULT_CRITERIA },
   sortBy: "distance",
   selectedId: null,
   pinnedId: null, // segment opened by a link: shown even if the filters exclude it
+  placing: false, // the next click on the map sets the position
 };
 
 // --- formatting ---------------------------------------------------------------
@@ -148,23 +155,28 @@ map.on("error", (event) => {
 });
 
 const popup = new maplibregl.Popup({ maxWidth: "300px" });
+// The position: a marker (DOM element) that can be dragged to another place.
+const marker = new maplibregl.Marker({
+  element: Object.assign(document.createElement("div"), { className: "position-marker" }),
+  draggable: true,
+});
+marker.on("dragend", () => {
+  const { lng, lat } = marker.getLngLat();
+  setPosition([lng, lat], "point déplacé");
+});
 const SEGMENT_LAYERS = ["segments", "overview"];
 
 function addDataLayers() {
   styleReady = true;
-  map.addSource("position", { type: "geojson", data: emptyCollection() });
-  if (state.archive) addSegmentLayers();
+  map.addSource("search-area", { type: "geojson", data: emptyCollection() });
+  // Below the segments, added after it.
   map.addLayer({
-    id: "position",
-    type: "circle",
-    source: "position",
-    paint: {
-      "circle-radius": 7,
-      "circle-color": "#e0245e",
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2,
-    },
+    id: "search-area",
+    type: "line",
+    source: "search-area",
+    paint: { "line-color": "#4a4a4a", "line-width": 1.5, "line-opacity": 0.7, "line-dasharray": [3, 2] },
   });
+  if (state.archive) addSegmentLayers();
   // A style change (basemap fallback) removes our layers: redraw everything.
   render();
 }
@@ -192,20 +204,16 @@ function addSegmentLayers() {
     16,
     ["case", selected, high * factor, high],
   ];
-  const before = map.getLayer("position") ? "position" : undefined;
   const layer = (id, sourceLayer, paint, zooms) =>
-    map.addLayer(
-      {
-        id,
-        type: "line",
-        source: "segments",
-        "source-layer": sourceLayer,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint,
-        ...zooms,
-      },
-      before,
-    );
+    map.addLayer({
+      id,
+      type: "line",
+      source: "segments",
+      "source-layer": sourceLayer,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint,
+      ...zooms,
+    });
   const detail = { minzoom: tiles.minzoom };
   const overview = { minzoom: tiles.overview_minzoom, maxzoom: tiles.minzoom };
   layer("overview", tiles.overview_layer, { "line-color": color, "line-width": width(3, 7, 1), "line-opacity": 0.8 }, overview);
@@ -217,6 +225,10 @@ function addSegmentLayers() {
 map.on("style.load", addDataLayers);
 
 map.on("click", (event) => {
+  if (state.placing) {
+    setPosition([event.lngLat.lng, event.lngLat.lat], "point placé sur la carte");
+    return;
+  }
   const layers = SEGMENT_LAYERS.filter((id) => map.getLayer(id));
   const [hit] = layers.length ? map.queryRenderedFeatures(event.point, { layers }) : [];
   if (hit?.layer.id === "segments") {
@@ -225,13 +237,13 @@ map.on("click", (event) => {
   } else if (hit) {
     // Overview: zoom in where the details (and the popup) are.
     map.flyTo({ center: event.lngLat, zoom: state.metadata.tiles.minzoom + 1 });
-  } else {
-    setPosition([event.lngLat.lng, event.lngLat.lat], "point choisi sur la carte");
   }
+  // Elsewhere: nothing (the popup closes by itself); the position moves only
+  // with the "place" button or by dragging the marker.
 });
 for (const id of SEGMENT_LAYERS) {
-  map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
-  map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
+  map.on("mouseenter", id, () => state.placing || (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", id, () => state.placing || (map.getCanvas().style.cursor = ""));
 }
 // Without a position, the results follow the map.
 map.on("moveend", () => {
@@ -286,12 +298,17 @@ function searchCenter() {
 
 // --- state updates ------------------------------------------------------------
 
+/**
+ * Map filters: the criteria, and the ids of the result list, which hold the
+ * distance limit (an expression cannot measure the distance to a line).
+ */
 function updateMapFilters() {
   if (!map.getLayer("segments")) return;
-  const filter = mapFilter(state.criteria, state.pinnedId);
+  const ids = state.results.map((r) => r.feature.properties.id);
+  const filter = mapFilter(state.criteria, state.pinnedId, ids);
   map.setFilter("segments", filter);
   map.setFilter("segments-casing", filter);
-  map.setFilter("overview", overviewFilter(state.criteria));
+  map.setFilter("overview", overviewFilter(state.criteria, ids));
 }
 
 function applyFilters() {
@@ -311,6 +328,8 @@ async function refreshResults() {
     state.sortBy,
   );
   state.missingTiles = failed;
+  state.searchArea = { center, radiusM: state.criteria.maxDistanceM };
+  updateMapFilters();
   render();
 }
 
@@ -354,13 +373,12 @@ function whenLayersReady(callback) {
 }
 
 function render() {
-  const position = map.getSource("position");
-  if (position) {
-    position.setData(
-      state.position
-        ? { type: "Feature", geometry: { type: "Point", coordinates: state.position }, properties: {} }
-        : emptyCollection(),
-    );
+  if (state.position) marker.setLngLat(state.position).addTo(map);
+  else marker.remove();
+  const area = map.getSource("search-area");
+  if (area) {
+    const { center, radiusM } = state.searchArea ?? {};
+    area.setData(center ? circlePolygon(center, radiusM) : emptyCollection());
   }
   renderResults();
 }
@@ -448,10 +466,16 @@ async function focusSegment(id) {
 
 function setPosition(position, label) {
   state.position = position;
-  const [lon, lat] = position;
-  $("position-status").textContent = `Position : ${lat.toFixed(5)}, ${lon.toFixed(5)} (${label}).`;
+  state.positionLabel = label;
+  if (state.placing) setPlacing(false); // the position was given another way
+  showPosition();
   applyFilters();
   updateUrl();
+}
+
+function showPosition() {
+  const [lon, lat] = state.position;
+  $("position-status").textContent = `Position : ${lat.toFixed(5)}, ${lon.toFixed(5)} (${state.positionLabel}).`;
 }
 
 // --- controls -----------------------------------------------------------------
@@ -507,15 +531,145 @@ $("locate").addEventListener("click", () => {
   );
 });
 
-$("latlon-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const position = parseLatLon($("latlon").value);
-  if (!position) {
-    $("position-status").textContent = "Format attendu : latitude, longitude (ex. 43.531, 1.533).";
+/** Placement mode: the next click on the map sets the position. */
+function setPlacing(placing) {
+  state.placing = placing;
+  $("place").setAttribute("aria-pressed", String(placing));
+  map.getCanvas().style.cursor = placing ? "crosshair" : "";
+  if (placing) {
+    $("position-status").textContent = "Cliquez sur la carte pour placer le point (Échap pour annuler).";
+  } else if (!state.position) {
+    $("position-status").textContent = "Aucune position : résultats autour du centre de la carte.";
+  } else {
+    showPosition();
+  }
+}
+
+$("place").addEventListener("click", () => setPlacing(!state.placing));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.placing) setPlacing(false);
+});
+
+// Address search: suggestions while typing, the chosen (or first) one on submit.
+const search = { results: [], active: -1, text: "", timer: null, controller: null };
+
+async function geocode(text) {
+  const { lng, lat } = map.getCenter();
+  const url = geocodeUrl(text, [lng, lat]);
+  if (!url) return [];
+  search.controller?.abort();
+  search.controller = new AbortController();
+  const response = await fetch(url, { signal: search.controller.signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return parseGeocodeResults(await response.json());
+}
+
+function showSuggestions(results, text) {
+  search.results = results;
+  search.text = text;
+  search.active = -1;
+  const list = $("suggestions");
+  list.replaceChildren(
+    ...results.map(({ label }, i) => {
+      const item = document.createElement("li");
+      item.id = `suggestion-${i}`;
+      item.setAttribute("role", "option");
+      item.textContent = label;
+      // mousedown, not click: the input must not lose the focus (blur hides the list).
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        chooseAddress(results[i]);
+      });
+      return item;
+    }),
+  );
+  list.hidden = !results.length;
+  $("latlon").setAttribute("aria-expanded", String(!list.hidden));
+  highlight(-1);
+}
+
+function hideSuggestions() {
+  clearTimeout(search.timer);
+  search.controller?.abort();
+  showSuggestions([], "");
+}
+
+function highlight(index) {
+  search.active = index;
+  for (const [i, item] of [...$("suggestions").children].entries()) {
+    item.setAttribute("aria-selected", String(i === index));
+  }
+  if (index >= 0) $("latlon").setAttribute("aria-activedescendant", `suggestion-${index}`);
+  else $("latlon").removeAttribute("aria-activedescendant");
+}
+
+function chooseAddress({ label, position }) {
+  $("latlon").value = label;
+  hideSuggestions();
+  setPosition(position, label);
+  map.flyTo({ center: position, zoom: 14 });
+}
+
+$("latlon").addEventListener("input", () => {
+  const text = $("latlon").value;
+  clearTimeout(search.timer);
+  if (parseLatLon(text) || !geocodeUrl(text)) {
+    hideSuggestions();
     return;
   }
-  setPosition(position, "saisie");
-  map.flyTo({ center: position, zoom: 14 });
+  search.timer = setTimeout(async () => {
+    try {
+      showSuggestions(await geocode(text), text);
+    } catch (error) {
+      if (error.name !== "AbortError") console.warn("Address suggestions unavailable", error);
+    }
+  }, SUGGEST_DELAY_MS);
+});
+
+$("latlon").addEventListener("keydown", (event) => {
+  const count = search.results.length;
+  if (!count) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    // Cycle through the suggestions and back to the typed text (index -1).
+    highlight(((search.active + 1 + step + count + 1) % (count + 1)) - 1);
+  } else if (event.key === "Escape") {
+    hideSuggestions();
+  }
+});
+$("latlon").addEventListener("blur", hideSuggestions);
+
+$("latlon-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("latlon").value;
+  const position = parseLatLon(text);
+  if (position) {
+    hideSuggestions();
+    setPosition(position, "saisie");
+    map.flyTo({ center: position, zoom: 14 });
+    return;
+  }
+  if (!geocodeUrl(text)) {
+    $("position-status").textContent = "Saisissez une adresse, ou latitude, longitude (ex. 43.531, 1.533).";
+    return;
+  }
+  // The highlighted suggestion, or the first one for this text.
+  if (search.text === text && search.results.length) {
+    chooseAddress(search.results[Math.max(0, search.active)]);
+    return;
+  }
+  $("position-status").textContent = "Recherche de l'adresse…";
+  clearTimeout(search.timer); // a pending suggestion request would abort this one
+  try {
+    const [first] = await geocode(text);
+    if (first) chooseAddress(first);
+    else $("position-status").textContent = `Adresse introuvable : ${text}.`;
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    console.warn(error);
+    $("position-status").textContent = "Recherche d'adresse impossible (réseau). Réessayez, ou saisissez latitude, longitude.";
+  }
 });
 
 // --- data loading -------------------------------------------------------------

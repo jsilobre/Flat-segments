@@ -139,9 +139,40 @@ select {
   background: var(--bg-soft);
 }
 
-#latlon {
+.search {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+
+#latlon {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.suggestions {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+}
+
+.suggestions li {
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.suggestions li[aria-selected="true"],
+.suggestions li:hover {
+  background: var(--bg-soft);
 }
 
 button {
@@ -154,6 +185,22 @@ button {
 
 button:hover {
   border-color: var(--accent);
+}
+
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.position-marker {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #e0245e;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+  cursor: grab;
 }
 
 input[type="range"] {

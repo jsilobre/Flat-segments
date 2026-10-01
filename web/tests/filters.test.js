@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  circlePolygon,
   buildUrlSearch,
   DEFAULT_CRITERIA,
   distanceToLineMeters,
@@ -150,6 +151,11 @@ function evaluate(expression, properties) {
   const [op, ...args] = expression;
   const value = (arg) => (Array.isArray(arg) ? evaluate(arg, properties) : arg);
   if (op === "get") return properties[args[0]];
+  if (op === "literal") return args[0];
+  if (op === "match") {
+    const [input, labels, then, otherwise] = args;
+    return labels.includes(value(input)) ? then : otherwise;
+  }
   if (op === "all") return args.every((a) => value(a));
   if (op === "any") return args.some((a) => value(a));
   const [a, b] = args.map(value);
@@ -180,6 +186,27 @@ test("mapFilter selects exactly what matches selects, plus the pinned segment", 
   assert.equal(evaluate(mapFilter(climbs, "d"), segments[3]), true);
   assert.equal(evaluate(overviewFilter(climbs), { kind: "climb", length_m: 300 }), true);
   assert.equal(evaluate(overviewFilter(climbs), { kind: "flat", length_m: 300 }), false);
+});
+
+test("map filters show only the listed segments, and the pinned one", () => {
+  const flat = { id: "a", kind: "flat", length_m: 400, grade_max_pct: 1, n_crossings: 0, surface: "paved" };
+  const criteria = { ...DEFAULT_CRITERIA };
+  assert.equal(evaluate(mapFilter(criteria, null, ["a", "b"]), flat), true);
+  assert.equal(evaluate(mapFilter(criteria, null, ["b"]), flat), false);
+  assert.equal(evaluate(mapFilter(criteria, null, []), flat), false);
+  assert.equal(evaluate(mapFilter(criteria, "a", []), flat), true);
+  // Listed but no longer matching (criteria changed before the list is rebuilt).
+  assert.equal(evaluate(mapFilter({ ...criteria, minLengthM: 500 }, null, ["a"]), flat), false);
+  assert.equal(evaluate(overviewFilter(criteria, ["a"]), flat), true);
+  assert.equal(evaluate(overviewFilter(criteria, []), flat), false);
+});
+
+test("circlePolygon is a closed ring at the given distance", () => {
+  const center = [1.533, 43.531];
+  const [ring] = circlePolygon(center, 5000, 32).geometry.coordinates;
+  assert.equal(ring.length, 33);
+  assert.deepEqual(ring[0], ring[32]);
+  for (const point of ring) assert.ok(Math.abs(haversineMeters(center, point) - 5000) < 0.01, String(point));
 });
 
 test("distances and bounds handle segments split into several lines", () => {

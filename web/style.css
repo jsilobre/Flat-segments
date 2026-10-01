@@ -156,6 +156,22 @@ button:hover {
   border-color: var(--accent);
 }
 
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.position-marker {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #e0245e;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+  cursor: grab;
+}
+
 input[type="range"] {
   width: 100%;
   accent-color: var(--accent);

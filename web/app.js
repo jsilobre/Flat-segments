@@ -62,10 +62,12 @@ const state = {
   query: 0, // id of the latest result query (older answers are ignored)
   missingTiles: 0, // tiles of the latest query that could not be read
   position: null,
+  positionLabel: "", // how the position was given
   criteria: { ...DEFAULT_CRITERIA },
   sortBy: "distance",
   selectedId: null,
   pinnedId: null, // segment opened by a link: shown even if the filters exclude it
+  placing: false, // the next click on the map sets the position
 };
 
 // --- formatting ---------------------------------------------------------------
@@ -150,13 +152,21 @@ map.on("error", (event) => {
 });
 
 const popup = new maplibregl.Popup({ maxWidth: "300px" });
+// The position: a marker (DOM element) that can be dragged to another place.
+const marker = new maplibregl.Marker({
+  element: Object.assign(document.createElement("div"), { className: "position-marker" }),
+  draggable: true,
+});
+marker.on("dragend", () => {
+  const { lng, lat } = marker.getLngLat();
+  setPosition([lng, lat], "point déplacé");
+});
 const SEGMENT_LAYERS = ["segments", "overview"];
 
 function addDataLayers() {
   styleReady = true;
-  map.addSource("position", { type: "geojson", data: emptyCollection() });
   map.addSource("search-area", { type: "geojson", data: emptyCollection() });
-  // Below the segments, which are inserted before the position layer.
+  // Below the segments, added after it.
   map.addLayer({
     id: "search-area",
     type: "line",
@@ -164,17 +174,6 @@ function addDataLayers() {
     paint: { "line-color": "#4a4a4a", "line-width": 1.5, "line-opacity": 0.7, "line-dasharray": [3, 2] },
   });
   if (state.archive) addSegmentLayers();
-  map.addLayer({
-    id: "position",
-    type: "circle",
-    source: "position",
-    paint: {
-      "circle-radius": 7,
-      "circle-color": "#e0245e",
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2,
-    },
-  });
   // A style change (basemap fallback) removes our layers: redraw everything.
   render();
 }
@@ -202,20 +201,16 @@ function addSegmentLayers() {
     16,
     ["case", selected, high * factor, high],
   ];
-  const before = map.getLayer("position") ? "position" : undefined;
   const layer = (id, sourceLayer, paint, zooms) =>
-    map.addLayer(
-      {
-        id,
-        type: "line",
-        source: "segments",
-        "source-layer": sourceLayer,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint,
-        ...zooms,
-      },
-      before,
-    );
+    map.addLayer({
+      id,
+      type: "line",
+      source: "segments",
+      "source-layer": sourceLayer,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint,
+      ...zooms,
+    });
   const detail = { minzoom: tiles.minzoom };
   const overview = { minzoom: tiles.overview_minzoom, maxzoom: tiles.minzoom };
   layer("overview", tiles.overview_layer, { "line-color": color, "line-width": width(3, 7, 1), "line-opacity": 0.8 }, overview);
@@ -227,6 +222,10 @@ function addSegmentLayers() {
 map.on("style.load", addDataLayers);
 
 map.on("click", (event) => {
+  if (state.placing) {
+    setPosition([event.lngLat.lng, event.lngLat.lat], "point placé sur la carte");
+    return;
+  }
   const layers = SEGMENT_LAYERS.filter((id) => map.getLayer(id));
   const [hit] = layers.length ? map.queryRenderedFeatures(event.point, { layers }) : [];
   if (hit?.layer.id === "segments") {
@@ -235,13 +234,13 @@ map.on("click", (event) => {
   } else if (hit) {
     // Overview: zoom in where the details (and the popup) are.
     map.flyTo({ center: event.lngLat, zoom: state.metadata.tiles.minzoom + 1 });
-  } else {
-    setPosition([event.lngLat.lng, event.lngLat.lat], "point choisi sur la carte");
   }
+  // Elsewhere: nothing (the popup closes by itself); the position moves only
+  // with the "place" button or by dragging the marker.
 });
 for (const id of SEGMENT_LAYERS) {
-  map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
-  map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
+  map.on("mouseenter", id, () => state.placing || (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", id, () => state.placing || (map.getCanvas().style.cursor = ""));
 }
 // Without a position, the results follow the map.
 map.on("moveend", () => {
@@ -371,14 +370,8 @@ function whenLayersReady(callback) {
 }
 
 function render() {
-  const position = map.getSource("position");
-  if (position) {
-    position.setData(
-      state.position
-        ? { type: "Feature", geometry: { type: "Point", coordinates: state.position }, properties: {} }
-        : emptyCollection(),
-    );
-  }
+  if (state.position) marker.setLngLat(state.position).addTo(map);
+  else marker.remove();
   const area = map.getSource("search-area");
   if (area) {
     const { center, radiusM } = state.searchArea ?? {};
@@ -470,10 +463,16 @@ async function focusSegment(id) {
 
 function setPosition(position, label) {
   state.position = position;
-  const [lon, lat] = position;
-  $("position-status").textContent = `Position : ${lat.toFixed(5)}, ${lon.toFixed(5)} (${label}).`;
+  state.positionLabel = label;
+  if (state.placing) setPlacing(false); // the position was given another way
+  showPosition();
   applyFilters();
   updateUrl();
+}
+
+function showPosition() {
+  const [lon, lat] = state.position;
+  $("position-status").textContent = `Position : ${lat.toFixed(5)}, ${lon.toFixed(5)} (${state.positionLabel}).`;
 }
 
 // --- controls -----------------------------------------------------------------
@@ -527,6 +526,25 @@ $("locate").addEventListener("click", () => {
     },
     { enableHighAccuracy: true, timeout: 10000 },
   );
+});
+
+/** Placement mode: the next click on the map sets the position. */
+function setPlacing(placing) {
+  state.placing = placing;
+  $("place").setAttribute("aria-pressed", String(placing));
+  map.getCanvas().style.cursor = placing ? "crosshair" : "";
+  if (placing) {
+    $("position-status").textContent = "Cliquez sur la carte pour placer le point (Échap pour annuler).";
+  } else if (!state.position) {
+    $("position-status").textContent = "Aucune position : résultats autour du centre de la carte.";
+  } else {
+    showPosition();
+  }
+}
+
+$("place").addEventListener("click", () => setPlacing(!state.placing));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.placing) setPlacing(false);
 });
 
 $("latlon-form").addEventListener("submit", (event) => {

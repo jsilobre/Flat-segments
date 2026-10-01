@@ -258,7 +258,7 @@ recalés à l'échelle régionale.
 
 | Étape | Contenu | Point à vérifier |
 |---|---|---|
-| **2.0 Mesures sur le pilote** | MNT au pas de 2 m au lieu de 1 m (volume divisé par 4) : écart sur les plats et les côtes, comme dans l'ADR 0007. Choix de l'outil de génération des PMTiles | Écart acceptable à 2 m ? Outil Python ou binaire (tippecanoe, planetiler) ? |
+| **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Adoption du pas de 2 m : soumise à validation |
 | **2.1 Pipeline par département** | Commande de traitement d'une liste de zones (contour du département), MNT téléchargé puis supprimé dalle par dalle, reprise après erreur, un `segments.parquet` par département | Disque et durée d'un département (≈ 6000 km², 2 à 3 h de MNT estimées) |
 | **2.2 PMTiles et front sur tuiles** | Export PMTiles, tous les attributs à partir du zoom ≈ 12. Le front construit la liste à partir des tuiles chargées autour de la position ; liens directs `?id=` via un petit index (id → position) | Taille de l'index ; tri et filtre de distance sur les seuls segments chargés |
 | **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |

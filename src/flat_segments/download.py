@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Collection, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +54,8 @@ WMS_FORMAT: Final = "image/x-bil;bits=32"
 # (docs/phase-2/2.0-mesures.md, ADR 0007).
 DEM_RESOLUTION_M: Final = 2.0
 DEM_TILE_SIZE_M: Final = 4000.0
+# Concurrent DEM requests: enough to hide latency, few enough for the service.
+DEM_WORKERS: Final = 4
 # Value of ``elevation_source`` for each known layer (docs/data-model.md).
 LAYER_SOURCES: Final = {WMS_LAYER_LIDAR_HD: "lidar_hd", WMS_LAYER_RGE_ALTI: "rge_alti_wms"}
 DEM_NODATA: Final = -99999.0
@@ -297,8 +300,9 @@ def write_tile(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     transform = from_bounds(tile.min_x, tile.min_y, tile.max_x, tile.max_y, tile.width, tile.height)
+    part = path.with_name(path.name + ".part")  # an interrupted write leaves no broken tile
     with rasterio.open(
-        path,
+        part,
         "w",
         driver="GTiff",
         width=tile.width,
@@ -315,6 +319,7 @@ def write_tile(
         dst.write(values.astype(np.float32), 1)
         if source is not None:
             dst.update_tags(**{SOURCE_TAG: source})
+    part.replace(path)
 
 
 def build_vrt(tiles: list[Path], vrt_path: Path, source: str | None = None) -> Path:
@@ -384,7 +389,11 @@ def _tile_is_current(path: Path, tile: DemTile, source: str) -> bool:
 
     if not path.exists():
         return False
-    with rasterio.open(path) as ds:
+    try:
+        ds = rasterio.open(path)
+    except rasterio.errors.RasterioIOError:
+        return False  # unreadable (e.g. truncated by an older version): fetch it again
+    with ds:
         same_grid = (ds.width, ds.height) == (tile.width, tile.height) and np.allclose(
             tuple(ds.bounds), (tile.min_x, tile.min_y, tile.max_x, tile.max_y)
         )
@@ -404,6 +413,7 @@ def download_dem(
     force: bool = False,
     retries: int = 6,
     area: BaseGeometry | None = None,
+    workers: int = DEM_WORKERS,
     on_tile: Callable[[int, int, DemTile], None] | None = None,
     sleep: Callable[[float], Any] = time.sleep,
 ) -> Path:
@@ -413,7 +423,8 @@ def download_dem(
     download can be resumed) unless ``force`` is set. With ``area`` (a
     Lambert-93 polygon), only the tiles touching it are fetched; the VRT
     returns nodata in the gaps. Tiles and VRT are tagged with the
-    layer's ``elevation_source``.
+    layer's ``elevation_source``. Up to ``workers`` tiles are fetched at once;
+    ``on_tile`` is called as tiles complete, with a running count.
 
     Returns:
         Path of the VRT (``out_dir / vrt_name``), tiles being in ``out_dir/tiles``.
@@ -422,16 +433,37 @@ def download_dem(
     tiles = dem_tiles(bounds, tile_size_m, resolution_m)
     if area is not None:
         tiles = tiles_touching(tiles, area)
-    paths = []
-    for index, tile in enumerate(tiles, start=1):
-        path = out_dir / "tiles" / tile.name
-        if force or not _tile_is_current(path, tile, source):
-            url = wms_getmap_url(tile, base_url=base_url, layer=layer)
-            data = fetch_bytes(
-                url, opener, retries=retries, transient_codes=WMS_TRANSIENT_CODES, sleep=sleep
-            )
-            write_tile(path, decode_bil(data, tile.width, tile.height), tile, source=source)
-        paths.append(path)
+    paths = [out_dir / "tiles" / tile.name for tile in tiles]
+    done = 0
+
+    def report(tile: DemTile) -> None:
+        nonlocal done
+        done += 1
         if on_tile is not None:
-            on_tile(index, len(tiles), tile)
+            on_tile(done, len(tiles), tile)
+
+    def fetch(tile: DemTile, path: Path) -> DemTile:
+        url = wms_getmap_url(tile, base_url=base_url, layer=layer)
+        data = fetch_bytes(
+            url, opener, retries=retries, transient_codes=WMS_TRANSIENT_CODES, sleep=sleep
+        )
+        write_tile(path, decode_bil(data, tile.width, tile.height), tile, source=source)
+        return tile
+
+    todo = []
+    for tile, path in zip(tiles, paths, strict=True):
+        if force or not _tile_is_current(path, tile, source):
+            todo.append((tile, path))
+        else:
+            report(tile)
+    # A few requests in flight hide the latency of the service (and of dropped
+    # connections) without loading it much.
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [pool.submit(fetch, tile, path) for tile, path in todo]
+        try:
+            for future in as_completed(futures):
+                report(future.result())
+        except BaseException:
+            pool.shutdown(cancel_futures=True)
+            raise
     return build_vrt(paths, out_dir / vrt_name, source)

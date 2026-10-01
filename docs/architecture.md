@@ -94,6 +94,7 @@ GeoJSON : un jeu publié dit toujours comment il a été produit.
 |---|---|
 | `report` | Résumé d'un fichier de segments : nombres, longueurs, longueurs cibles, traversées, revêtements, *flags* |
 | `sweep` | Relance la détection pour plusieurs valeurs d'un paramètre et compare les résultats |
+| `compare` | Compare deux fichiers de segments (deux MNT, deux réglages, deux passages) : nombres, km, part des km de chacun retrouvée dans l'autre à 10 m près, segments manquants |
 | `inspect` | Profil brut / lissé et pente locale autour d'un segment (PNG, matplotlib) |
 | `validation-sheet` | Échantillon représentatif de segments sous forme de fiche terrain à remplir ([`validation/`](validation/README.md)) |
 | `config` | Affiche les paramètres effectifs en TOML |

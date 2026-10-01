@@ -290,6 +290,26 @@ def report(
 
 
 @app.command()
+def compare(
+    a: Annotated[Path, typer.Argument(help="Reference segments GeoParquet.", exists=True)],
+    b: Annotated[Path, typer.Argument(help="Segments GeoParquet to compare.", exists=True)],
+    buffer_m: Annotated[float, typer.Option(help="Distance under which a point matches.")] = 10.0,
+    missing: Annotated[bool, typer.Option(help="List the ids of A missing in B.")] = False,
+) -> None:
+    """Compare two segments files: counts, km, overlap in both directions."""
+    from flat_segments.calibration import compare as compare_runs
+    from flat_segments.calibration import format_comparison
+    from flat_segments.export import read_segments
+
+    rows = compare_runs(read_segments(a), read_segments(b), buffer_m)
+    typer.echo(format_comparison(rows, "A", "B"), nl=False)
+    if missing:
+        for row in rows:
+            for segment_id in row.missing_in_b:
+                typer.echo(segment_id)
+
+
+@app.command()
 def sweep(
     key: Annotated[str, typer.Argument(help="Parameter, e.g. flat.max_local_grade_pct.")],
     values: Annotated[list[str], typer.Argument(help="Values to try (TOML syntax).")],

@@ -114,6 +114,7 @@ Elles sont documentées dans [`docs/algorithm.md`](docs/algorithm.md#13-récapit
 ```bash
 uv run flat-segments report                                   # résumé des segments détectés
 uv run flat-segments sweep flat.max_local_grade_pct 1 1.5 2   # sensibilité à un paramètre
+uv run flat-segments compare a.parquet b.parquet              # recouvrement de deux jeux de segments
 uv run flat-segments inspect flat-3fa2b1c9d0e4                # profil d'un segment (PNG, matplotlib)
 uv run flat-segments validation-sheet --count 20              # fiche terrain → docs/validation/pilot.md
 ```

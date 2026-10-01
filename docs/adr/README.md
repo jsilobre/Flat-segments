@@ -16,6 +16,7 @@ ADR NNNN ». Les corrections mineures (précision, lien) se font sur place.
 | [0007](0007-altitude-lidar-hd.md) | Altitude : MNT LiDAR HD de l'IGN, RGE ALTI® en repli | Acceptée |
 | [0008](0008-couverture-nationale-precalcul-statique.md) | Couverture nationale par précalcul statique (PMTiles), API facultative | Acceptée |
 | [0009](0009-pmtiles-tippecanoe.md) | Tuiles vectorielles PMTiles produites avec tippecanoe | Acceptée |
+| [0010](0010-geocodage-ign.md) | Recherche d'adresse avec le géocodeur de l'IGN | Acceptée |
 
 ## Gabarit
 

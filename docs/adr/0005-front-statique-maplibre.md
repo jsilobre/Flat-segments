@@ -23,7 +23,8 @@ pas de serveur à maintenir si on peut l'éviter.
 - Fond de carte **OpenFreeMap** (tuiles vectorielles OSM, sans clé). En cas
   d'indisponibilité du fond, la page reste utilisable (segments sur fond neutre).
 - Données : `web/data/segments.geojson` précalculé, filtré dans le navigateur.
-  Position par géolocalisation, clic sur la carte ou saisie lat, lon.
+  Position par géolocalisation, point placé sur la carte (bouton, puis clic ;
+  déplaçable), saisie lat, lon ou adresse ([ADR 0010](0010-geocodage-ign.md)).
 - Logique de filtrage isolée dans un module pur (`filters.js`), testé avec
   `node --test`.
 - Attributions OSM, IGN et OpenFreeMap affichées sur la carte.

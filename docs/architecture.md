@@ -166,7 +166,16 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
 - `app.js` : carte MapLibre GL JS (modules ES chargés depuis un CDN par une
   *import map*, versions figées et empreintes SRI : `maplibre-gl`, `pmtiles`,
   `fflate`), fond vectoriel OpenFreeMap avec repli sur un fond uni, panneau de
-  filtres, liste des résultats, géolocalisation.
+  filtres, liste des résultats.
+- **Position** :
+  - géolocalisation de l'appareil ;
+  - point placé sur la carte : bouton « Placer sur la carte », puis un clic.
+    Un clic sans ce bouton ne déplace pas le point ; on peut aussi le faire
+    glisser ;
+  - saisie, dans un même champ, de « latitude, longitude » ou d'une adresse,
+    avec suggestions pendant la frappe (géocodeur de l'IGN,
+    [ADR 0010](adr/0010-geocodage-ign.md), fonctions pures dans
+    `geocode.js`).
 - **Données en tuiles vectorielles** ([ADR 0009](adr/0009-pmtiles-tippecanoe.md),
   [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles`, lu par le
   protocole `pmtiles://` (requêtes partielles, sans serveur).
@@ -211,6 +220,7 @@ sequenceDiagram
     participant B as Navigateur (app.js)
     participant T as tiles.js / filters.js
     participant S as Hébergement statique
+    participant G as Géocodeur IGN
 
     B->>S: GET data/segments.json
     alt 404
@@ -218,7 +228,11 @@ sequenceDiagram
         B->>U: bandeau « données d'exemple »
     end
     B->>S: GET data/segments.pmtiles (plages d'octets : en-tête, tuiles visibles)
-    U->>B: « Me localiser » / clic sur la carte / saisie lat,lon
+    U->>B: « Me localiser » / « Placer sur la carte » + clic / saisie lat,lon ou adresse
+    opt adresse
+        B->>G: recherche (suggestions)
+        G-->>B: adresses et positions
+    end
     U->>B: choisit type, longueur min, pente, distance max…
     B->>S: tuiles z12 couvrant le cercle de recherche (plages d'octets)
     B->>T: decodeTile, segmentsFromTiles, filterSegments

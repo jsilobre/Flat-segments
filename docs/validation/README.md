@@ -77,3 +77,10 @@ Analyse des problèmes :
   ne porte aucun tag d'accès sur ces voies, et le pipeline ne peut pas deviner
   la restriction. La bonne correction se fait dans OSM (`access=*`) : elle
   sera prise en compte au prochain passage du pipeline.
+
+Liens de la fiche : ils visent le jeu publié le 30/09/2026 (MNT à 1 m).
+Depuis le passage au MNT à 2 m (01/10/2026), 4 des 20 segments ont changé
+d'identifiant, car leurs extrémités ont bougé de quelques mètres. Leur lien
+« voir » ne les trouve plus : `flat-212d857016a5`, `climb-6b5326e4cc22`,
+`climb-9a4a6f0c091a` et `climb-35ee7ffc67d8`. Les segments eux-mêmes sont
+toujours détectés.

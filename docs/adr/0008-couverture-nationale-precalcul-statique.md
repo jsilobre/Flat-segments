@@ -64,12 +64,13 @@ sont à confirmer à l'échelle régionale.
   des résultats est construite à partir des segments des tuiles chargées
   autour de la position, qui doivent porter tous leurs attributs à partir
   d'un niveau de zoom donné (environ 12).
-- Le téléchargement du MNT devient le poste le plus coûteux (de l'ordre de 9
-  jours en séquentiel pour la métropole). Il faut paralléliser par
-  département, en restant dans les limites d'usage de l'IGN. Un pas de 2 m au
-  lieu de 1 m diviserait le volume par 4 ; c'est à mesurer sur le pilote
-  avant de décider ([ADR 0007](0007-altitude-lidar-hd.md) : même un MNT d'environ 4 m
-  retrouve 92 % des plats).
+- Le téléchargement du MNT devient le poste le plus coûteux. Il faut
+  paralléliser par département, en restant dans les limites d'usage de
+  l'IGN.
+  - Au pas de 1 m : de l'ordre de 9 jours en séquentiel pour la métropole.
+  - Au pas de 2 m, adopté depuis (amendement de
+    l'[ADR 0007](0007-altitude-lidar-hd.md)) : environ 2,7 jours, et 45 min
+    par département.
 - Une chaîne de production par lot est nécessaire : découpage par
   département, reprise après erreur, assemblage des PMTiles.
 

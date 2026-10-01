@@ -30,7 +30,8 @@ sondage sur 98, un par dalle de 2 km.
 ## Décision
 
 - Source d'altitude par défaut : **MNT LiDAR HD de l'IGN**, extrait par
-  `download-dem` au pas de 1 m sur l'emprise (couche WMS
+  `download-dem` sur l'emprise, au pas de 2 m depuis le 01/10/2026 (voir
+  l'amendement en fin de document ; 1 m auparavant), via la couche WMS
   `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93`).
   Les segments portent `elevation_source = "lidar_hd"`.
 - **Repli** : le RGE ALTI®, là où le LiDAR HD ne couvre pas encore le
@@ -85,3 +86,21 @@ sondage sur 98, un par dalle de 2 km.
 - **Dalles LiDAR HD d'origine (50 cm)** : plus fines que nécessaire, avec un
   pas d'échantillonnage de 5 m et un lissage de 10 m. Volume quatre fois
   plus gros.
+
+## Amendement du 01/10/2026 : extraction au pas de 2 m
+
+Mesures de l'étape 2.0 de la phase 2 ([rapport](../phase-2/2.0-mesures.md)) :
+au pas de 2 m, en dalles de 4 km (2000 × 2000 px, 16 Mo par requête),
+
+- 98 % des km de plats et 99 % des km de côtes du 1 m sont retrouvés à 10 m
+  près. Les segments perdus sont des cas limites, courts et proches des
+  seuils ;
+- les 20 segments de la fiche terrain sont tous retrouvés, et leur pente
+  varie de 0,25 point au plus ;
+- le téléchargement de la zone pilote passe de 9 min 03 s à 2 min 36 s, et
+  son volume de 681 à 182 Mo.
+
+`download-dem` extrait donc désormais le MNT au **pas de 2 m, en dalles de
+4 km**. L'échantillonnage bilinéaire tous les 5 m et le lissage (σ = 10 m)
+restent inchangés : ils lissent de toute façon sous l'échelle de 2 m.
+L'option `--resolution-m 1 --tile-size-m 2000` redonne l'ancien réglage.

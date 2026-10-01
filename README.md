@@ -46,8 +46,8 @@ Déjà en place :
   - liens directs vers un segment ;
   - déploiement GitHub Pages par workflow.
 - **Segments réels de la zone pilote** (`web/data/segments.geojson`, 2,5 Mo) :
-  - 767 plats (323 km) et 2269 côtes (497 km) ;
-  - tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN ;
+  - 778 plats (322 km) et 2266 côtes (497 km) ;
+  - tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN (pas de 2 m) ;
   - seuils calibrés sur ces données
     ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
 

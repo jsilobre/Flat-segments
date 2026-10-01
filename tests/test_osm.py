@@ -123,6 +123,18 @@ def test_read_ways_from_osm_xml(tmp_path: Path) -> None:
     assert length == pytest.approx(806, rel=0.01)
 
 
+def test_read_ways_within_an_area(tmp_path: Path) -> None:
+    from shapely.geometry import Polygon, box
+
+    path = tmp_path / "sample.osm"
+    path.write_text(OSM_XML)
+    around_node_4 = box(1.534, 43.524, 1.536, 43.526)
+    assert [w.id for w in osm.read_ways(path, area=around_node_4)] == [11]
+    # The bounding box of this triangle holds nodes 5 and 6, the triangle does not.
+    triangle = Polygon([(1.85, 43.6), (1.94, 43.6), (1.85, 43.69)])
+    assert osm.read_ways(path, area=triangle) == []
+
+
 def test_read_ways_without_bbox_keeps_everything_relevant(tmp_path: Path) -> None:
     path = tmp_path / "sample.osm"
     path.write_text(OSM_XML)

@@ -17,11 +17,11 @@ import math
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, Final, cast
+from typing import IO, TYPE_CHECKING, Any, Final, cast
 from urllib.parse import urlencode
 from xml.sax.saxutils import escape
 
@@ -31,6 +31,9 @@ from flat_segments import __version__
 from flat_segments.elevation import SOURCE_TAG
 from flat_segments.geometry import FloatArray
 from flat_segments.params import WORK_CRS
+
+if TYPE_CHECKING:
+    from shapely.geometry.base import BaseGeometry
 
 USER_AGENT: Final = f"flat-segments/{__version__} (+https://github.com/jsilobre/Flat-segments)"
 GEOFABRIK_URL: Final = "https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf"
@@ -212,6 +215,15 @@ def dem_tiles(
     return tiles
 
 
+def tiles_touching(tiles: Sequence[DemTile], area: BaseGeometry) -> list[DemTile]:
+    """Tiles intersecting a Lambert-93 polygon (e.g. a grown département outline)."""
+    import shapely
+    from shapely.geometry import box
+
+    shapely.prepare(area)
+    return [t for t in tiles if area.intersects(box(t.min_x, t.min_y, t.max_x, t.max_y))]
+
+
 def wms_getmap_url(
     tile: DemTile, *, base_url: str = WMS_URL, layer: str = WMS_LAYER, fmt: str = WMS_FORMAT
 ) -> str:
@@ -374,13 +386,16 @@ def download_dem(
     vrt_name: str = "pilot.vrt",
     force: bool = False,
     retries: int = 6,
+    area: BaseGeometry | None = None,
     on_tile: Callable[[int, int, DemTile], None] | None = None,
     sleep: Callable[[float], Any] = time.sleep,
 ) -> Path:
     """Download DEM tiles over Lambert-93 ``bounds`` and assemble them in a VRT.
 
     Tiles already on disk from the same layer and the same grid are kept (the
-    download can be resumed) unless ``force`` is set. Tiles and VRT are tagged with the
+    download can be resumed) unless ``force`` is set. With ``area`` (a
+    Lambert-93 polygon), only the tiles touching it are fetched; the VRT
+    returns nodata in the gaps. Tiles and VRT are tagged with the
     layer's ``elevation_source``.
 
     Returns:
@@ -388,6 +403,8 @@ def download_dem(
     """
     source = source_for_layer(layer)
     tiles = dem_tiles(bounds, tile_size_m, resolution_m)
+    if area is not None:
+        tiles = tiles_touching(tiles, area)
     paths = []
     for index, tile in enumerate(tiles, start=1):
         path = out_dir / "tiles" / tile.name

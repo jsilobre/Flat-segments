@@ -200,6 +200,21 @@ def test_download_dem_replaces_tiles_from_another_grid(tmp_path: Path) -> None:
         np.testing.assert_allclose(dem.sample(xy), plane(xy[:, 0], xy[:, 1]), rtol=1e-6)
 
 
+def test_download_dem_only_fetches_tiles_touching_the_area(tmp_path: Path) -> None:
+    from shapely.geometry import box
+
+    web = FakeWeb({dl.WMS_URL: fake_wms})
+    bounds = (1000.0, 2000.0, 1600.0, 2200.0)  # three 200 m tiles in a row
+    area = box(1050.0, 2050.0, 1150.0, 2150.0).union(box(1450.0, 2050.0, 1550.0, 2150.0))
+    vrt = dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5, area=area)
+    assert len(web.requests) == 2  # the middle tile is skipped
+    with RasterDem(vrt) as dem:
+        z = dem.sample(np.array([[1100.0, 2100.0], [1300.0, 2100.0], [1500.0, 2100.0]]))
+    assert z[0] == pytest.approx(plane(np.array(1100.0), np.array(2100.0)))
+    assert np.isnan(z[1])  # gap between the tiles: nodata
+    assert z[2] == pytest.approx(plane(np.array(1500.0), np.array(2100.0)))
+
+
 def test_default_grid_is_2_m_in_4_km_tiles() -> None:
     [tile, *_] = dl.dem_tiles((0, 0, 8000, 4000), dl.DEM_TILE_SIZE_M, dl.DEM_RESOLUTION_M)
     assert (tile.max_x - tile.min_x, tile.width, tile.height) == (4000, 2000, 2000)

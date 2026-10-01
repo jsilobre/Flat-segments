@@ -150,7 +150,9 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
   filtrage, tri, état de l'URL), testé avec `node --test` (`web/tests/`,
   `web/package.json` ne sert qu'aux tests).
 - **Liens directs** : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
-  position et `?kind=climb` affiche les côtes. L'URL suit la sélection, ce qui
+  position et `?kind=climb` affiche les côtes. Le segment d'un lien reste
+  affiché même s'il sort des filtres (une côte à 2,97 % avec un minimum de
+  3 %, par exemple), jusqu'à la fermeture de sa fiche. L'URL suit la sélection, ce qui
   sert à partager un segment et à la fiche de validation terrain.
 - **Publication** : le workflow `.github/workflows/pages.yml` déploie `web/`
   (sans les tests) sur GitHub Pages à chaque modification sur `main`.
@@ -183,8 +185,10 @@ Le site est hébergeable sur GitHub Pages tel quel (dossier `web/`).
 
 ### 3.4 Future API (phase 3)
 
-Quand le volume ou le besoin de calcul à la demande dépasseront le modèle
-statique :
+Facultative depuis l'[ADR 0008](adr/0008-couverture-nationale-precalcul-statique.md) :
+la France est couverte par précalcul statique. L'API ne servirait qu'à ce que
+le statique ne sait pas faire (étranger, fraîcheur des données, critères
+personnalisés, retours des utilisateurs) :
 
 ```mermaid
 flowchart LR
@@ -235,13 +239,30 @@ flowchart TD
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
 | **0 — Squelette** *(terminée)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, front sur données fictives, CI | synthétiques | ce dépôt |
-| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages, exécution sur les vraies données, calibrage des seuils, publication *(faits)* ; validation terrain (Labège / Caraman) *(à faire)* | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
-| **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + MNT LiDAR HD (RGE ALTI où il manque) | site statique + PMTiles |
-| **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |
+| **1 — Prototype pilote** *(terminée)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages, exécution sur les vraies données, calibrage des seuils, publication, validation terrain (Labège / Caraman : 15 segments conformes sur 18, aucune erreur de pente ni de traversée) | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
+| **2 — Couverture nationale par précalcul** *(à venir)* | Précalcul par département, export PMTiles, front sur tuiles ; d'abord l'ex-Midi-Pyrénées sur GitHub Pages, puis la France sur un stockage d'objets ([ADR 0008](adr/0008-couverture-nationale-precalcul-statique.md)) | OSM + MNT LiDAR HD (RGE ALTI où il manque), par département | site statique + PMTiles |
+| **3 — API** *(facultative)* | Seulement pour ce que le statique ne sait pas faire : étranger (MNT 30 m), mises à jour OSM au fil de l'eau, critères personnalisés, retours des utilisateurs | multi-sources | API + front |
 
 Critère de passage de la phase 1 à la phase 2 : sur un échantillon de segments
 vérifiés à pied, la précision est jugée suffisante (segments annoncés plats
-réellement plats, traversées correctement comptées).
+réellement plats, traversées correctement comptées). Il est rempli depuis la
+[campagne 1](validation/README.md#campagne-1--zone-pilote-octobre-2026).
+
+### 5.1 Plan de la phase 2
+
+Objectif : toute la France, réponse instantanée, hébergement statique
+([ADR 0008](adr/0008-couverture-nationale-precalcul-statique.md)). Les
+ordres de grandeur ci-dessous sont extrapolés de la zone pilote et seront
+recalés à l'échelle régionale.
+
+| Étape | Contenu | Point à vérifier |
+|---|---|---|
+| **2.0 Mesures sur le pilote** | MNT au pas de 2 m au lieu de 1 m (volume divisé par 4) : écart sur les plats et les côtes, comme dans l'ADR 0007. Choix de l'outil de génération des PMTiles | Écart acceptable à 2 m ? Outil Python ou binaire (tippecanoe, planetiler) ? |
+| **2.1 Pipeline par département** | Commande de traitement d'une liste de zones (contour du département), MNT téléchargé puis supprimé dalle par dalle, reprise après erreur, un `segments.parquet` par département | Disque et durée d'un département (≈ 6000 km², 2 à 3 h de MNT estimées) |
+| **2.2 PMTiles et front sur tuiles** | Export PMTiles, tous les attributs à partir du zoom ≈ 12. Le front construit la liste à partir des tuiles chargées autour de la position ; liens directs `?id=` via un petit index (id → position) | Taille de l'index ; tri et filtre de distance sur les seuls segments chargés |
+| **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |
+| **2.4 Production automatisée** | Workflow GitHub Actions, une tâche par département, puis assemblage ; régénération périodique | Limites d'Actions (6 h et ~14 Go de disque par tâche) et limites d'usage de l'IGN |
+| **2.5 France métropolitaine** | 96 départements, PMTiles (1 à 2 Go estimés) sur un stockage d'objets (type Cloudflare R2) | Changement d'hébergement, CORS et requêtes partielles |
 
 ## 6. Qualité et outillage
 
@@ -268,4 +289,5 @@ réellement plats, traversées correctement comptées).
 | Qualité OSM variable | Revêtement ou éclairage souvent absents ; traversées non modélisées si les voies ne partagent pas de nœud | Valeur `unknown` explicite ; validation terrain en phase 1 |
 | Trottoirs cartographiés en double | Un trottoir `footway=sidewalk` et sa rue donnent deux segments quasi identiques | Déduplication géométrique (§ 9 de l'algorithme) |
 | Routes ≥ `tertiary` avec trottoir non cartographié séparément | Tronçon ignoré, alors qu'il serait praticable | Limite assumée au prototype |
+| Voies de service dans les parkings | Une voie `highway=service` sans `service=parking_aisle` qui traverse un parking donne un segment non praticable, et le cheminement piéton qui la longe passe pour un doublon (validation terrain, campagne 1) | Limite connue. Piste : exclure les voies `service` situées dans une zone `amenity=parking` |
 | Données figées | Chantier récent, nouvelle voie verte… | Date de l'extrait OSM et du MNT dans les métadonnées de l'export |

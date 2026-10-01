@@ -1,6 +1,6 @@
 # 0005 — Front statique MapLibre d'abord, API ensuite
 
-- **Statut** : Acceptée
+- **Statut** : Acceptée ; rôle de l'API revu par l'[ADR 0008](0008-couverture-nationale-precalcul-statique.md)
 - **Date** : 2026-09-30
 
 ## Contexte

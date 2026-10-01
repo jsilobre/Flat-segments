@@ -50,6 +50,7 @@ const state = {
   criteria: { ...DEFAULT_CRITERIA },
   sortBy: "distance",
   selectedId: null,
+  pinnedId: null, // segment opened by a link: shown even if the filters exclude it
 };
 
 // --- formatting ---------------------------------------------------------------
@@ -197,7 +198,10 @@ function emptyCollection() {
 // --- state updates ------------------------------------------------------------
 
 function applyFilters() {
-  state.results = sortResults(filterSegments(state.features, state.criteria, state.position), state.sortBy);
+  state.results = sortResults(
+    filterSegments(state.features, state.criteria, state.position, state.pinnedId),
+    state.sortBy,
+  );
   if (state.selectedId !== null && !state.results.some((r) => r.feature.properties.id === state.selectedId)) {
     clearSelection();
   }
@@ -214,8 +218,18 @@ function clearSelection() {
   updateUrl();
 }
 
+/** The linked segment follows the filters again. */
+function unpin() {
+  state.pinnedId = null;
+  applyFilters();
+}
+
 popup.on("close", () => {
-  if (state.selectedId !== null) clearSelection();
+  // Closed by the user (clearSelection resets selectedId before closing it).
+  if (state.selectedId === null) return;
+  const wasPinned = state.selectedId === state.pinnedId;
+  clearSelection();
+  if (wasPinned) unpin();
 });
 
 function updateUrl() {
@@ -282,6 +296,7 @@ function renderResults() {
 }
 
 function selectSegment(id, lngLat = null) {
+  if (state.pinnedId !== null && id !== state.pinnedId) unpin();
   const result = state.results.find((r) => r.feature.properties.id === id);
   if (!result) return;
   clearSelection();
@@ -302,8 +317,8 @@ function focusSegment(id) {
     return;
   }
   $(`kind-${feature.properties.kind}`).checked = true;
-  $("min-length").value = "100";
   readControls();
+  state.pinnedId = id;
   applyFilters();
   whenLayersReady(() => selectSegment(id));
 }

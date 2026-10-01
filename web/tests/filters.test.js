@@ -75,6 +75,18 @@ test("filterSegments applies the distance limit only with a position", () => {
   near(results[0].distanceM, 111, 5);
 });
 
+test("filterSegments keeps the pinned segment whatever the criteria", () => {
+  const gentle = feature({ id: "climb-a", kind: "climb", grade_mean_pct: 2.97 });
+  const far = feature({ id: "climb-b", kind: "climb", grade_mean_pct: 5 }, [[1.7, 43.6], [1.705, 43.6]]);
+  const c = { ...DEFAULT_CRITERIA, kind: "climb", maxDistanceM: 2000 };
+  const position = [1.532, 43.531];
+  assert.deepEqual(filterSegments([gentle, far], c, position), []);
+  assert.deepEqual(filterSegments([gentle, far], c, position, "climb-a").map((r) => r.feature), [gentle]);
+  const [pinnedFar] = filterSegments([gentle, far], c, position, "climb-b");
+  assert.equal(pinnedFar.feature, far);
+  assert.ok(pinnedFar.distanceM > 2000); // distance still reported
+});
+
 test("sortResults by distance then score, or by score", () => {
   const a = { feature: feature({ score: 60 }), distanceM: 300 };
   const b = { feature: feature({ score: 90 }), distanceM: 800 };

@@ -29,7 +29,7 @@ Le détail des calculs est dans [`docs/algorithm.md`](docs/algorithm.md).
 
 ## Statut
 
-🚧 **Phase 1 : prototype sur la zone pilote.**
+✅ **Phase 1 terminée : prototype sur la zone pilote.**
 
 Déjà en place :
 - **Pipeline complet**, testé sur des données synthétiques puis lancé sur la
@@ -51,8 +51,10 @@ Déjà en place :
   - seuils calibrés sur ces données
     ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
 
-Reste à faire : la validation terrain, avec la fiche
-[`docs/validation/pilot.md`](docs/validation/pilot.md) (20 segments).
+- **Validation terrain** ([fiche](docs/validation/pilot.md),
+  [bilan](docs/validation/README.md#campagne-1--zone-pilote-octobre-2026)) :
+  15 segments conformes sur 18 vérifiés, aucune erreur de pente ni de
+  traversée.
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).

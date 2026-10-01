@@ -237,13 +237,14 @@ flowchart TD
 | Phase | Contenu | Données | Livrable |
 |---|---|---|---|
 | **0 — Squelette** *(terminée)* | Documents d'architecture, logique pure testée, E/S testées sur fichiers synthétiques, front sur données fictives, CI | synthétiques | ce dépôt |
-| **1 — Prototype pilote** *(en cours)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages, exécution sur les vraies données, calibrage des seuils, publication *(faits)* ; validation terrain (Labège / Caraman) *(à faire)* | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
+| **1 — Prototype pilote** *(terminée)* | Téléchargements automatisés, configuration TOML, outils de calibrage, liens directs et déploiement Pages, exécution sur les vraies données, calibrage des seuils, publication, validation terrain (Labège / Caraman : 15 segments conformes sur 18, aucune erreur de pente ni de traversée) | OSM + MNT LiDAR HD de la zone pilote | site statique en ligne |
 | **2 — Passage à l'échelle régionale** | Toute l'ex-région Midi-Pyrénées, export PMTiles si le GeoJSON dépasse quelques Mo, parallélisation par dalle | OSM Midi-Pyrénées + MNT LiDAR HD (RGE ALTI où il manque) | site statique + PMTiles |
 | **3 — API** | FastAPI + PostGIS, multi-régions, calcul à la demande, mises à jour OSM incrémentales, repli sur un MNT 30 m hors de France | multi-sources | API + front |
 
 Critère de passage de la phase 1 à la phase 2 : sur un échantillon de segments
 vérifiés à pied, la précision est jugée suffisante (segments annoncés plats
-réellement plats, traversées correctement comptées).
+réellement plats, traversées correctement comptées). Il est rempli depuis la
+[campagne 1](validation/README.md#campagne-1--zone-pilote-octobre-2026).
 
 ## 6. Qualité et outillage
 
@@ -270,4 +271,5 @@ réellement plats, traversées correctement comptées).
 | Qualité OSM variable | Revêtement ou éclairage souvent absents ; traversées non modélisées si les voies ne partagent pas de nœud | Valeur `unknown` explicite ; validation terrain en phase 1 |
 | Trottoirs cartographiés en double | Un trottoir `footway=sidewalk` et sa rue donnent deux segments quasi identiques | Déduplication géométrique (§ 9 de l'algorithme) |
 | Routes ≥ `tertiary` avec trottoir non cartographié séparément | Tronçon ignoré, alors qu'il serait praticable | Limite assumée au prototype |
+| Voies de service dans les parkings | Une voie `highway=service` sans `service=parking_aisle` qui traverse un parking donne un segment non praticable, et le cheminement piéton qui la longe passe pour un doublon (validation terrain, campagne 1) | Limite connue. Piste : exclure les voies `service` situées dans une zone `amenity=parking` |
 | Données figées | Chantier récent, nouvelle voie verte… | Date de l'extrait OSM et du MNT dans les métadonnées de l'export |

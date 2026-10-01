@@ -1,9 +1,11 @@
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pytest
 
 from flat_segments import calibration as cal
+from flat_segments.config import ConfigError
 from flat_segments.detect import Segment, SegmentKind, detect_all
 from flat_segments.geometry import FloatArray
 from flat_segments.network import EventKind, Stroke, StrokeEvent
@@ -54,6 +56,13 @@ def test_sweep_reruns_detection() -> None:
     assert table.splitlines()[0].startswith("| flat.max_mean_grade_pct |")
 
 
+@pytest.mark.parametrize("key", ["network.max_deflection_deg", "profile.step_m"])
+def test_sweep_rejects_parameters_used_before_detection(key: str) -> None:
+    _, strokes, z = dataset()
+    with pytest.raises(ConfigError, match="extract"):
+        cal.sweep(strokes, z, PARAMS, key, ["1", "2"])
+
+
 def test_select_for_validation_is_representative_and_deterministic() -> None:
     segments, _, _ = dataset()
     assert len(cal.select_for_validation(segments, 10)) == len(segments)
@@ -62,6 +71,20 @@ def test_select_for_validation_is_representative_and_deterministic() -> None:
     assert any(s.kind is SegmentKind.CLIMB for s in picked)
     assert any(s.n_crossings > 0 for s in picked)
     assert [s.id for s in picked] == [s.id for s in cal.select_for_validation(segments, 3)]
+
+
+def test_select_for_validation_balances_flats_and_climbs() -> None:
+    segments, _, _ = dataset()
+    flat = next(s for s in segments if s.kind is SegmentKind.FLAT)
+    climb = next(s for s in segments if s.kind is SegmentKind.CLIMB)
+    flats = [replace(flat, id=f"flat-{i}", score=float(i)) for i in range(3)]
+    climbs = [replace(climb, id=f"climb-{i}", score=float(i)) for i in range(30)]
+    picked = cal.select_for_validation(flats + climbs, 4)
+    assert [s.kind for s in picked].count(SegmentKind.FLAT) == 2
+    picked = cal.select_for_validation(flats + climbs, 10)  # only 3 flats
+    assert [s.kind for s in picked].count(SegmentKind.FLAT) == 3
+    assert len(picked) == 10
+    assert len(cal.select_for_validation(climbs, 5)) == 5
 
 
 def test_validation_sheet_is_a_fillable_table() -> None:

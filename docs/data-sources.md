@@ -1,12 +1,10 @@
 # Sources de données
 
 Deux sources suffisent au prototype : **OpenStreetMap** pour le réseau et ses
-attributs, et le **RGE ALTI® 1 m** de l'IGN pour l'altitude. Ce document
+attributs, et un **MNT de l'IGN** pour l'altitude : le **MNT LiDAR HD**, avec
+le **RGE ALTI®** en repli ([ADR 0007](adr/0007-altitude-lidar-hd.md)). Ce document
 précise, pour chacune, les formats, le téléchargement, la projection, la
 licence et les volumes.
-
-> ⚠️ Les volumes marqués « ordre de grandeur » sont à confirmer au premier
-> téléchargement, puis à mettre à jour ici.
 
 ## OpenStreetMap
 
@@ -38,6 +36,19 @@ uv run flat-segments download-osm
    dans libosmium.
 
 Options utiles : `--url` (autre extrait), `--bbox`, `--no-clip`, `--force`.
+
+**Miroir.** Si Geofabrik est inaccessible, par exemple bloqué par un proxy,
+OpenStreetMap France publie le même découpage régional, avec son `.md5`, mis à
+jour chaque jour. C'est ce miroir qui a servi au premier passage sur la zone
+pilote :
+
+```bash
+uv run flat-segments download-osm \
+  --url https://download.openstreetmap.fr/extracts/europe/france/midi_pyrenees.osm.pbf
+```
+
+Attention au nom : `midi_pyrenees.osm.pbf` a un `.md5`, mais pas
+`midi_pyrenees-latest.osm.pbf`.
 
 - **Format** : PBF (Protocol Buffers), nœuds, ways et relations.
 - **Fraîcheur** : régénéré quotidiennement ; des diffs (`.osc.gz`) sont
@@ -75,39 +86,41 @@ la topologie (nœuds partagés = intersections).
   (imagerie, traces GPS).
 - Tout ceci est à valider sur le terrain en phase 1.
 
-## RGE ALTI® (IGN)
+## Altitude : MNT de l'IGN
 
 ### Contenu
 
-Modèle numérique de **terrain** (MNT) : altitude du sol nu, sans bâtiments ni
-végétation.
+Deux modèles numériques de **terrain** (MNT) : altitude du sol nu, sans
+bâtiments ni végétation.
 
-- Pas de 1 m (il existe aussi une version à 5 m).
-- Couvre la France métropolitaine et les DROM.
-- Origine variable selon les zones : **LiDAR** aéroporté (précision de l'ordre
-  de 20 cm), radar, ou **corrélation d'images** (précision métrique, voire
-  pluri-métrique en relief marqué). Le produit fournit des couches annexes
-  (masque de source, distance d'interpolation) qui permettent de savoir d'où
-  vient chaque maille.
+| | MNT LiDAR HD (**par défaut**) | RGE ALTI® (repli) |
+|---|---|---|
+| Origine | Programme LiDAR HD : levés LiDAR aéroportés récents | Mosaïque de sources : LiDAR, radar ou corrélation d'images |
+| Pas d'origine | 50 cm | 1 m (et une version à 5 m) |
+| Précision | décimétrique partout | de 20 cm (zones LiDAR) à métrique, voire plus en relief marqué (corrélation) |
+| Couverture | France métropolitaine en cours d'achèvement ; **toute la zone pilote** est couverte | France métropolitaine et DROM |
+| `elevation_source` | `lidar_hd` | `rge_alti_1m` (archive) ou `rge_alti_wms` (WMS) |
 
-Pourquoi 1 m ([ADR 0003](adr/0003-altitude-rge-alti-1m.md)) : juger qu'un
-tronçon de 200 m a moins de 2 % de pente locale demande de distinguer quelques
-dizaines de centimètres de dénivelé. Un MNT à 30 m (SRTM, Copernicus GLO-30)
-en est incapable : une seule maille couvre 15 % du segment.
+Pourquoi un MNT au mètre ([ADR 0003](adr/0003-altitude-rge-alti-1m.md),
+[ADR 0007](adr/0007-altitude-lidar-hd.md)) : juger qu'un tronçon de 200 m a
+moins de 2 % de pente locale demande de distinguer quelques dizaines de
+centimètres de dénivelé. Un MNT à 30 m (SRTM, Copernicus GLO-30) en est
+incapable : une seule maille couvre 15 % du segment.
 
 ### Formats et projection
 
-- **Dalles** de 1 km × 1 km au format **ASCII Grid** (`.asc`), regroupées
-  par **département** dans des archives `.7z`.
 - Projection **Lambert-93 (EPSG:2154)** en métropole. Altitudes en **NGF-IGN69**
   (m), sans importance pour nous : seules les différences d'altitude comptent.
-- Valeur *nodata* : `-99999`.
+- Dalles écrites par `download-dem` : GeoTIFF compressés, *nodata* `-99999`.
+- Le service WMS marque les zones sans donnée par `-9999` (LiDAR HD) ou
+  `-99999` (RGE ALTI). À la lecture, toute valeur inférieure à `-1000` devient
+  *nodata*.
+- Archive RGE ALTI : dalles de 1 km × 1 km (ASCII Grid `.asc` ou GeoTIFF),
+  regroupées par **département** dans des archives `.7z`.
 
 ### Téléchargement
 
-Page produit : <https://geoservices.ign.fr/rgealti>. Deux façons de faire :
-
-1. **Automatique : extraction sur l'emprise**, méthode retenue pour le
+1. **Automatique : extraction sur l'emprise par WMS**, méthode retenue pour le
    prototype :
 
    ```bash
@@ -117,44 +130,61 @@ Page produit : <https://geoservices.ign.fr/rgealti>. Deux façons de faire :
    La commande découpe l'emprise (convertie en Lambert-93, arrondie au km) en
    dalles de 2 km au plus. Pour chacune, elle demande l'image d'altitude au
    service WMS raster de la
-   [Géoplateforme](https://geoservices.ign.fr/services-geoplateforme-diffusion) :
+   [Géoplateforme](https://geoservices.ign.fr/services-geoplateforme-diffusion).
+   Réglages vérifiés avec `GetCapabilities` le 30/09/2026 :
 
    | Réglage | Valeur |
    |---|---|
    | Point d'accès | `https://data.geopf.fr/wms-r/wms` |
-   | Couche | `ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES` |
-   | Format | `image/x-bil;bits=32` (flottants 32 bits bruts) |
-   | Version | WMS 1.3.0, `CRS=EPSG:2154` |
-   | Taille d'une image | 2000 × 2000 pixels au pas de 1 m |
+   | Couche (défaut) | `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93`, stockée en Lambert-93 |
+   | Format | `image/x-bil;bits=32` : flottants 32 bits bruts, **petit-boutiste** (*little-endian*) |
+   | Version | WMS 1.3.0, `CRS=EPSG:2154`, `STYLES` vide (style `normal` : valeurs brutes) |
+   | Taille max d'une image | 5010 × 5010 pixels (`MaxWidth`, `MaxHeight`) |
+   | Taille d'une dalle | 2000 × 2000 pixels au pas de 1 m, soit 16 Mo par requête |
 
    Chaque dalle est enregistrée en GeoTIFF compressé dans
-   `data/raw/rge_alti/tiles/`. Le téléchargement peut reprendre après une
-   interruption : les dalles déjà présentes sont gardées. Les dalles sont
-   ensuite assemblées dans la mosaïque virtuelle `data/raw/rge_alti/pilot.vrt`,
-   dont les chemins sont relatifs.
+   `data/raw/dem/tiles/`. Les dalles sont ensuite assemblées dans la mosaïque
+   virtuelle `data/raw/dem/pilot.vrt`, dont les chemins sont relatifs.
 
-   > ⚠️ Le nom de la couche, le format et la taille maximale d'une requête
-   > restent **à vérifier** avec `GetCapabilities` au premier téléchargement
-   > réel. Ils sont réglables par `--layer`, `--wms-url`, `--tile-size-m` et
-   > `--resolution-m`.
+   - **Reprise** : on peut relancer la commande après une interruption. Les
+     dalles déjà présentes sont gardées si elles viennent de la même couche,
+     sinon elles sont retéléchargées.
+   - **Source** : les dalles et le VRT portent la métadonnée
+     `ELEVATION_SOURCE` (`lidar_hd`, `rge_alti_wms`). L'étape `elevation` la
+     relit, et `--source` permet de la forcer.
+   - **Fiabilité** : le service coupe parfois la connexion ou répond
+     `400 LayerNotDefined` pour une couche qui existe. Chaque dalle est
+     retentée jusqu'à six fois.
+   - **Autre couche** : `--layer`, `--wms-url`, `--tile-size-m` et
+     `--resolution-m`.
+
+   > ⚠️ La couche RGE ALTI du même service
+   > (`--layer ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES`) est stockée en
+   > coordonnées géographiques et rééchantillonnée par le serveur. Sa résolution
+   > effective en Lambert-93 n'est que d'environ **3,5 m × 4,7 m**, en marches
+   > d'escalier. Voir [ADR 0007](adr/0007-altitude-lidar-hd.md).
 
    C'est léger à télécharger, mais cela dépend d'un service en ligne et c'est
    moins reproductible qu'une archive.
 
-2. **Repli manuel : archive départementale** (Haute-Garonne, 31), à télécharger
-   depuis la page produit, puis décompresser. On assemble ensuite un VRT GDAL
-   limité aux dalles de la zone pilote :
+2. **Repli manuel : archive RGE ALTI 1 m départementale**, là où le LiDAR HD
+   manque. Pour la Haute-Garonne (31), l'édition du 26/11/2024 est listée sur
+   `https://data.geopf.fr/telechargement/resource/RGEALTI?zone=D031`. Elle pèse
+   6,8 Go en deux volumes `.7z` (GeoTIFF). On la décompresse, puis on assemble
+   un VRT GDAL limité aux dalles de la zone pilote :
 
    ```bash
-   mkdir -p data/raw/rge_alti
-   # après téléchargement de l'archive RGEALTI_..._D031_... dans data/raw/rge_alti
-   7z x data/raw/rge_alti/RGEALTI_*D031*.7z -odata/raw/rge_alti/
+   mkdir -p data/raw/dem
+   # après téléchargement de l'archive RGEALTI_..._D031_... dans data/raw/dem
+   7z x data/raw/dem/RGEALTI_*D031*.7z.001 -odata/raw/dem/
    gdalbuildvrt -a_srs EPSG:2154 -te 576000 6265000 604000 6278000 \
-     data/raw/rge_alti/pilot.vrt $(find data/raw/rge_alti -name '*.asc')
+     data/raw/dem/pilot.vrt $(find data/raw/dem -name '*.asc' -o -name '*.tif')
    ```
 
    L'emprise est en Lambert-93, arrondie au km, et couvre la zone pilote
    `1.48,43.48,1.80,43.59`. C'est ce que calcule `elevation.bbox_to_lambert93`.
+   Un VRT sans métadonnée `ELEVATION_SOURCE` est considéré comme
+   `rge_alti_1m`.
 
 Le pipeline ne dépend que d'un raster lisible par rasterio en Lambert-93
 (`.vrt`, GeoTIFF ou COG), quelle que soit la façon dont on l'a obtenu.
@@ -162,8 +192,9 @@ Le pipeline ne dépend que d'un raster lisible par rasterio en Lambert-93
 ### Licence
 
 [Licence Ouverte / Open Licence 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/)
-(Etalab). Réutilisation libre, y compris commerciale, sous réserve
-d'attribution : « IGN – RGE ALTI® », avec la date de mise à jour de la donnée.
+(Etalab), pour les deux produits. Réutilisation libre, y compris commerciale,
+sous réserve d'attribution : « IGN – MNT LiDAR HD » ou « IGN – RGE ALTI® ».
+L'export GeoJSON choisit la mention selon la source réellement utilisée.
 
 ### Pièges
 
@@ -174,14 +205,6 @@ d'attribution : « IGN – RGE ALTI® », avec la date de mise à jour de la don
   donc absents du MNT.
 
 Les parades sont décrites dans [`algorithm.md` § 3–5](algorithm.md#4-ponts-tunnels-et-trous).
-
-### Alternative future : MNT LiDAR HD
-
-L'IGN diffuse aussi, sous la même licence, un MNT dérivé du programme
-**LiDAR HD** : pas de 50 cm, issu uniquement de levés LiDAR récents. S'il
-couvre la zone pilote, c'est un candidat naturel pour améliorer la précision
-sans changer le pipeline (même projection, même type de raster). Voir
-[ADR 0003](adr/0003-altitude-rge-alti-1m.md).
 
 ## Repli hors de France : MNT 30 m
 
@@ -216,12 +239,13 @@ qui incluent arbres et bâtiments.
 
 | Donnée | Volume | Remarque |
 |---|---|---|
-| PBF Midi-Pyrénées | quelques centaines de Mo (ordre de grandeur) | `data/raw/` |
-| PBF zone pilote (découpé) | quelques Mo | `data/raw/pilot.osm.pbf` |
-| RGE ALTI 1 m, département 31 | plusieurs Go compressés (ordre de grandeur) | `data/raw/rge_alti/` |
-| MNT zone pilote | ≈ 28 km × 13 km ≈ 1,5 Go en float32 non compressé (98 dalles WMS de 2 km, ou 364 dalles départementales de 1 km) ; quelques centaines de Mo en GeoTIFF compressé | `data/raw/rge_alti/` ; le VRT ne recopie rien |
-| `strokes.parquet` / `profiles.parquet` (pilote) | quelques Mo à quelques dizaines de Mo | `data/interim/` |
-| `segments.geojson` (pilote) | quelques Mo au plus | `web/data/` ; PMTiles au-delà de ~ 10 Mo |
+| PBF Midi-Pyrénées | 412 Mo (extrait du 29/09/2026) ; environ 10 min de téléchargement | `data/raw/` |
+| PBF zone pilote (découpé) | 1,5 Mo : 13 934 voies `highway=*`, 93 764 nœuds | `data/raw/pilot.osm.pbf` |
+| Archive RGE ALTI 1 m, département 31 | 6,8 Go (GeoTIFF, deux volumes `.7z`) | repli manuel, `data/raw/dem/` |
+| MNT LiDAR HD zone pilote | 28 km × 13 km : 98 dalles WMS de 2 km, 1,5 Go transférés (float32), **681 Mo** en GeoTIFF compressé ; environ 9 min de téléchargement | `data/raw/dem/` ; le VRT ne recopie rien |
+| RGE ALTI par WMS, zone pilote | 109 Mo en GeoTIFF compressé (valeurs en marches d'escalier, très compressibles) | comparaison seulement |
+| `strokes.parquet` / `profiles.parquet` (pilote) | 2,5 Mo / 3,1 Mo : 9145 strokes, 1616 km de voies | `data/interim/` |
+| `segments.geojson` (pilote) | 2,5 Mo pour environ 3000 segments | `web/data/` ; PMTiles au-delà de ~ 10 Mo |
 
 Rien de tout cela n'est versionné (`/data/` est dans `.gitignore`). Seul le jeu
 d'exemple fictif du front l'est.

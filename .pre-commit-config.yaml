@@ -11,6 +11,9 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=1024"]
+        # The published segments are versioned on purpose; their own limit is
+        # ~10 MB, beyond which the page switches to PMTiles (ADR 0005).
+        exclude: ^web/data/segments\.geojson$
 
   - repo: local
     hooks:

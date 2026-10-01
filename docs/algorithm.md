@@ -113,7 +113,8 @@ qui se prolonge en rue résidentielle. Il ne franchit jamais une route `MAJOR`.
    intervalles égaux, avec `[profile.step_m]` = 5 m. Le pas effectif `L / n`
    est donc ≤ 5 m, et l'étape `detect` retrouve exactement la même grille.
 2. L'altitude est lue dans le MNT par **interpolation bilinéaire** : le
-   RGE ALTI est au pas de 1 m, et l'interpolation évite les marches d'escalier.
+   MNT est au pas de 1 m (LiDAR HD, [ADR 0007](adr/0007-altitude-lidar-hd.md)), et
+   l'interpolation évite les marches d'escalier.
 3. *(option)* **Échantillonnage transversal** : si
    `[profile.lateral_offset_m]` > 0, on échantillonne aussi à ± cette
    distance, perpendiculairement au tracé, et on garde la médiane des trois
@@ -321,7 +322,7 @@ séparément :
 1. Trier les segments par score décroissant.
 2. Pour chaque candidat A, pris dans cet ordre : A est **écarté** s'il existe
    un segment K déjà retenu tel que la part des points de A (rééchantillonnés
-   tous les `[profile.step_m]`) situés à moins de `[dedup.buffer_m]` = 10 m
+   tous les `[profile.step_m]`) situés à moins de `[dedup.buffer_m]` = 20 m
    de K dépasse `[dedup.max_overlap]` = 50 %. Sinon, A est retenu.
 3. Pré-filtre : on ne compare que les paires dont les boîtes englobantes,
    élargies de `buffer_m`, se recouvrent.
@@ -329,6 +330,15 @@ séparément :
 La mesure est asymétrique : un plat de 2 km sur la rue, dont seuls 300 m
 sont doublés par un trottoir, est conservé même si le trottoir a un meilleur
 score.
+
+**Calibrage de `buffer_m`** (zone pilote, 30/09/2026) :
+
+- Avec 10 m, il restait 58 paires de segments parallèles : piste cyclable et
+  trottoir côte à côte, chemin longeant une rue, etc.
+- Leur écart médian est de 11 m, et 90 % sont à moins de 17 m.
+- Passer à 20 m les retire : 23 plats (−2,9 %) et 33 côtes (−1,4 %). À 25 m,
+  le gain est faible (5 plats de plus) et le risque de fondre deux voies
+  distinctes augmente.
 
 ## 12. Identifiant stable
 
@@ -370,7 +380,7 @@ export, on ajoute un suffixe `-2`, `-3`… par score décroissant.
 | `climb.min_local_grade_pct` | 1 % | Seuil de « replat » |
 | `climb.max_flat_stretch_m` | 20 m | Longueur max d'un replat dans une fenêtre |
 | `climb.max_sinuosity` | 1,5 | Sinuosité max d'une fenêtre |
-| `dedup.buffer_m` | 10 m | Distance de recouvrement |
+| `dedup.buffer_m` | 20 m | Distance de recouvrement |
 | `dedup.max_overlap` | 0,5 | Part de recouvrement au-delà de laquelle un segment est écarté |
 
 Le pipeline utilise des seuils **permissifs** (rappel élevé) ; c'est au front
@@ -383,13 +393,17 @@ toucher au code :
 - par des surcharges `--set flat.max_local_grade_pct=1.5`.
 
 `flat-segments sweep` compare les résultats de plusieurs valeurs d'un
-paramètre.
+paramètre. Il relance la détection sur les strokes et les profils déjà
+calculés. Il refuse donc les paramètres appliqués avant la détection :
+`network.*`, `profile.step_m` et `profile.lateral_offset_m`. Pour ceux-là, il
+faut relancer `pipeline` avec `--set`.
 
 ## 14. Coût et limites connues
 
-- **Coût** : linéaire en longueur de réseau. Pour la zone pilote (quelques
-  milliers de km de voies), la détection prend quelques secondes à quelques
-  dizaines de secondes. Le poste le plus lourd est la lecture du MNT.
+- **Coût** : linéaire en longueur de réseau. Sur la zone pilote (1616 km de
+  voies, 9145 strokes), le pipeline complet prend environ 30 s, dont une
+  quinzaine pour la détection et la déduplication. Un `sweep` coûte donc
+  environ 15 s par valeur.
 - **Traversées sans nœud commun** : deux voies qui se croisent sans partager
   de nœud sont soit à des niveaux différents (pont, tunnel, `layer`), soit mal
   cartographiées. Elles ne sont pas comptées. Une détection géométrique,

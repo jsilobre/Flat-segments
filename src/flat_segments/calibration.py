@@ -21,7 +21,7 @@ from typing import Final
 
 import numpy as np
 
-from flat_segments.config import apply_overrides
+from flat_segments.config import ConfigError, apply_overrides
 from flat_segments.detect import Segment, SegmentKind, detect_all
 from flat_segments.geometry import FloatArray
 from flat_segments.network import EventKind, Stroke
@@ -99,6 +99,11 @@ class SweepRow:
     climb_km: float
 
 
+#: Parameters used before detection (``extract``, ``elevation``): sweeping
+#: them over precomputed strokes and profiles would change nothing.
+UPSTREAM_KEYS: Final = ("network.", "profile.step_m", "profile.lateral_offset_m")
+
+
 def sweep(
     strokes: Sequence[Stroke],
     z_raw: Mapping[str, FloatArray],
@@ -110,8 +115,14 @@ def sweep(
     """Rerun detection with ``key`` set to each of ``values`` (override syntax).
 
     Raises:
-        ConfigError: If ``key`` or a value is invalid.
+        ConfigError: If ``key`` or a value is invalid, or if ``key`` is only
+            used by ``extract`` or ``elevation`` (:data:`UPSTREAM_KEYS`).
     """
+    if key.startswith(UPSTREAM_KEYS):
+        raise ConfigError(
+            f"{key} is applied by `extract` / `elevation`, not by `detect`: "
+            "rerun the pipeline with --set to compare its values"
+        )
     rows = []
     for value in values:
         run_params = apply_overrides(params, [f"{key}={value}"])
@@ -238,17 +249,18 @@ def _fr(value: float, digits: int = 1) -> str:
 def select_for_validation(segments: Sequence[Segment], count: int) -> list[Segment]:
     """Pick a deterministic, representative sample for field validation.
 
-    Climbs get a share proportional to their number (at least 3 when there
-    are some). Within a kind, one flagged segment and one with crossings are
-    included when available, then segments evenly spread over the score range.
+    Flats and climbs share the sample equally, whatever their numbers (on
+    the pilot area, climbs outnumber flats three to one, and a proportional
+    share left only 5 flats out of 20); a kind short of segments leaves its
+    places to the other. Within a kind, one flagged segment and one with
+    crossings are included when available, then segments evenly spread over
+    the score range.
     """
     if count >= len(segments):
         return sorted(segments, key=lambda s: (s.kind.value, -s.score))
     flats = sorted((s for s in segments if s.kind is SegmentKind.FLAT), key=lambda s: -s.score)
     climbs = sorted((s for s in segments if s.kind is SegmentKind.CLIMB), key=lambda s: -s.score)
-    n_climbs = min(
-        len(climbs), max(min(3, len(climbs)), round(count * len(climbs) / len(segments)))
-    )
+    n_climbs = min(len(climbs), count // 2 if flats else count)
     n_flats = min(len(flats), count - n_climbs)
     picked: list[Segment] = []
     for items, quota in ((flats, n_flats), (climbs, count - n_flats)):

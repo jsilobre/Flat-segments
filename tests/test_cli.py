@@ -73,6 +73,24 @@ def test_full_pipeline_on_synthetic_files(tmp_path: Path) -> None:
     assert props["elevation_source"] == "rge_alti_1m"
 
 
+def test_elevation_source_is_read_from_the_dem(tmp_path: Path) -> None:
+    import rasterio
+
+    from flat_segments.elevation import SOURCE_TAG
+    from flat_segments.export import read_profiles
+
+    pbf, dem = make_inputs(tmp_path)
+    with rasterio.open(dem, "r+") as ds:
+        ds.update_tags(**{SOURCE_TAG: "lidar_hd"})
+    strokes, profiles = tmp_path / "strokes.parquet", tmp_path / "profiles.parquet"
+    runner.invoke(cli.app, ["extract", "--pbf", str(pbf), "--bbox", BBOX, "--out", str(strokes)])
+    args = ["elevation", "--dem", str(dem), "--strokes", str(strokes), "--out", str(profiles)]
+    assert runner.invoke(cli.app, args).exit_code == 0
+    assert read_profiles(profiles).elevation_source == "lidar_hd"
+    assert runner.invoke(cli.app, [*args, "--source", "other"]).exit_code == 0
+    assert read_profiles(profiles).elevation_source == "other"
+
+
 def test_missing_input_is_reported(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["extract", "--pbf", str(tmp_path / "missing.pbf")])
     assert result.exit_code != 0

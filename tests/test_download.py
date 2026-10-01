@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import urllib.error
 from collections.abc import Callable, Iterator
@@ -11,7 +12,7 @@ import numpy as np
 import pytest
 
 from flat_segments import download as dl
-from flat_segments.elevation import RasterDem
+from flat_segments.elevation import RasterDem, raster_source
 
 
 class FakeWeb:
@@ -72,6 +73,27 @@ def test_fetch_bytes_retries_server_errors_but_not_client_errors() -> None:
         dl.fetch_bytes("https://example.org/missing", web, sleep=no_sleep)
 
 
+def test_fetch_bytes_retries_transient_client_errors() -> None:
+    body = io.BytesIO(b"<ServiceException code='LayerNotDefined'/>")
+    web = FakeWeb({URL: b"ok"})
+    web.failures[URL] = [urllib.error.HTTPError(URL, 400, "Bad Request", {}, body)]  # type: ignore[arg-type]
+    assert dl.fetch_bytes(URL, web, transient_codes={400}, sleep=no_sleep) == b"ok"
+    web.failures[URL] = [urllib.error.HTTPError(URL, 400, "Bad Request", {}, body)]  # type: ignore[arg-type]
+    with pytest.raises(dl.DownloadError, match="HTTP 400"):
+        dl.fetch_bytes(URL, web, sleep=no_sleep)
+
+
+def test_fetch_bytes_retries_dropped_connections() -> None:
+    web = FakeWeb({URL: b"ok"})
+    web.failures[URL] = [
+        ConnectionResetError(104, "Connection reset by peer"),
+        http.client.RemoteDisconnected("closed"),
+        http.client.IncompleteRead(b"par"),
+    ]
+    assert dl.fetch_bytes(URL, web, retries=4, sleep=no_sleep) == b"ok"
+    assert len(web.requests) == 4
+
+
 def test_dem_tiles_cover_the_bounds() -> None:
     tiles = dl.dem_tiles((0, 0, 5000, 3000), 2000, 1.0)
     assert len(tiles) == 6
@@ -96,6 +118,20 @@ def test_decode_bil_reports_service_exceptions() -> None:
     np.testing.assert_array_equal(dl.decode_bil(values.tobytes(), 3, 2), values)
     with pytest.raises(dl.DownloadError, match="ServiceException"):
         dl.decode_bil(b"<?xml version='1.0'?><ServiceException>bad layer</ServiceException>", 3, 2)
+
+
+def test_decode_bil_maps_service_nodata() -> None:
+    # LiDAR HD answers -9999 outside its coverage, RGE ALTI -99999.
+    raw = np.array([[152.5, -9999.0, -99999.0, np.nan, -5.0]], dtype="<f4")
+    values = dl.decode_bil(raw.tobytes(), 5, 1)
+    np.testing.assert_array_equal(values, [[152.5, *[dl.DEM_NODATA] * 3, -5.0]])
+
+
+def test_known_layers_have_a_source_label() -> None:
+    assert dl.WMS_LAYER == dl.WMS_LAYER_LIDAR_HD
+    assert dl.source_for_layer(dl.WMS_LAYER_LIDAR_HD) == "lidar_hd"
+    assert dl.source_for_layer(dl.WMS_LAYER_RGE_ALTI) == "rge_alti_wms"
+    assert dl.source_for_layer("OTHER") == "unknown"
 
 
 def plane(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -135,6 +171,20 @@ def test_download_dem_builds_a_seamless_vrt_and_resumes(tmp_path: Path) -> None:
     requests = len(web.requests)
     dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5)
     assert len(web.requests) == requests  # tiles already on disk
+    assert raster_source(vrt) == "lidar_hd"
+    assert raster_source(tmp_path / "tiles" / "1000_2000.tif") == "lidar_hd"
+
+
+def test_download_dem_replaces_tiles_from_another_layer(tmp_path: Path) -> None:
+    web = FakeWeb({dl.WMS_URL: fake_wms})
+    bounds = (1000.0, 2000.0, 1200.0, 2200.0)
+    dl.download_dem(bounds, tmp_path, web, tile_size_m=200, resolution_m=5)
+    vrt = dl.download_dem(
+        bounds, tmp_path, web, tile_size_m=200, resolution_m=5, layer=dl.WMS_LAYER_RGE_ALTI
+    )
+    assert len(web.requests) == 2  # the LiDAR HD tile is not reused
+    assert "LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES" in web.requests[1]
+    assert raster_source(vrt) == "rge_alti_wms"
 
 
 def test_build_vrt_needs_tiles(tmp_path: Path) -> None:

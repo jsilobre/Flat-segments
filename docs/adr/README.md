@@ -9,10 +9,11 @@ ADR NNNN ». Les corrections mineures (précision, lien) se font sur place.
 |---|---|---|
 | [0001](0001-pipeline-python-uv.md) | Pipeline hors ligne en Python ≥ 3.12, géré avec uv | Acceptée |
 | [0002](0002-reseau-osm-pyosmium.md) | Réseau issu d'OpenStreetMap (Geofabrik), lu avec pyosmium | Acceptée |
-| [0003](0003-altitude-rge-alti-1m.md) | Altitude : RGE ALTI® 1 m de l'IGN | Acceptée |
+| [0003](0003-altitude-rge-alti-1m.md) | Altitude : RGE ALTI® 1 m de l'IGN | Remplacée par ADR 0007 |
 | [0004](0004-stockage-geoparquet.md) | Stockage prototype en GeoParquet, PostGIS plus tard | Acceptée |
 | [0005](0005-front-statique-maplibre.md) | Front statique MapLibre d'abord, API ensuite | Acceptée |
 | [0006](0006-strokes-et-troncons-maximaux.md) | Chaînage par continuité (*strokes*) et tronçons maximaux | Acceptée |
+| [0007](0007-altitude-lidar-hd.md) | Altitude : MNT LiDAR HD de l'IGN, RGE ALTI® en repli | Acceptée |
 
 ## Gabarit
 

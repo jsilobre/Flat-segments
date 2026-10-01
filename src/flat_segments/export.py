@@ -27,10 +27,24 @@ from flat_segments.params import WEB_CRS, WORK_CRS
 
 SCHEMA_VERSION: Final = "0.1"
 
-ATTRIBUTION: Final = (
-    "© les contributeurs d'OpenStreetMap (ODbL)",
-    "IGN – RGE ALTI® (Licence Ouverte 2.0)",  # noqa: RUF001 (French typography)
-)
+OSM_ATTRIBUTION: Final = "© les contributeurs d'OpenStreetMap (ODbL)"
+#: Attribution line of each elevation source (docs/data-sources.md).
+SOURCE_ATTRIBUTION: Final = {
+    "lidar_hd": "IGN – MNT LiDAR HD (Licence Ouverte 2.0)",  # noqa: RUF001 (French typography)
+    "rge_alti_1m": "IGN – RGE ALTI® (Licence Ouverte 2.0)",  # noqa: RUF001
+    "rge_alti_wms": "IGN – RGE ALTI® (Licence Ouverte 2.0)",  # noqa: RUF001
+}
+
+
+def attribution_for(segments: Sequence[Segment]) -> list[str]:
+    """Attribution lines for segments: OSM, then each elevation source used."""
+    lines = [OSM_ATTRIBUTION]
+    for source in sorted({s.elevation_source for s in segments}):
+        line = SOURCE_ATTRIBUTION.get(source)
+        if line is not None and line not in lines:
+            lines.append(line)
+    return lines
+
 
 #: Public segment fields, in export order (docs/data-model.md).
 PUBLIC_FIELDS: Final = (
@@ -104,7 +118,7 @@ def segments_to_geojson(
     *,
     sample: bool = False,
     generated_at: datetime | None = None,
-    attribution: Sequence[str] = ATTRIBUTION,
+    attribution: Sequence[str] | None = None,
     params: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a GeoJSON FeatureCollection (RFC 7946) with a ``metadata`` member.
@@ -114,7 +128,8 @@ def segments_to_geojson(
         to_wgs84: Projection to WGS84; defaults to Lambert-93 -> WGS84.
         sample: Marks the data as fictitious (the web page shows a banner).
         generated_at: Export timestamp (defaults to now, UTC).
-        attribution: Attribution lines shown on the map.
+        attribution: Attribution lines shown on the map; by default OSM and
+            the elevation sources of the segments (:func:`attribution_for`).
         params: Detection parameters (nested mapping) recorded in the metadata.
     """
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
@@ -136,7 +151,9 @@ def segments_to_geojson(
             "schema_version": SCHEMA_VERSION,
             "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "sample": sample,
-            "attribution": list(attribution),
+            "attribution": list(
+                attribution if attribution is not None else attribution_for(segments)
+            ),
             **({"params": dict(params)} if params is not None else {}),
         },
         "features": features,

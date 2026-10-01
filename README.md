@@ -32,22 +32,27 @@ Le détail des calculs est dans [`docs/algorithm.md`](docs/algorithm.md).
 🚧 **Phase 1 : prototype sur la zone pilote.**
 
 Déjà en place :
-- **Pipeline complet**, testé sur des données synthétiques :
+- **Pipeline complet**, testé sur des données synthétiques puis lancé sur la
+  zone pilote :
   - lecture OSM avec pyosmium et découpe de l'extrait ;
   - échantillonnage du MNT avec rasterio ;
   - détection, score et déduplication ;
   - export GeoParquet et GeoJSON.
-- **Téléchargements automatisés** : extrait Geofabrik et dalles RGE ALTI via la
-  Géoplateforme.
+- **Téléchargements automatisés** : extrait OSM (Geofabrik ou miroir) et dalles
+  du MNT LiDAR HD via la Géoplateforme.
 - **Outils de calibrage** : rapport, balayage de paramètres, profil d'un segment,
   fiche de validation terrain.
 - **Front statique** :
   - liens directs vers un segment ;
-  - déploiement GitHub Pages par workflow ;
-  - pour l'instant, un jeu de segments **fictifs** généré autour de Labège.
+  - déploiement GitHub Pages par workflow.
+- **Segments réels de la zone pilote** (`web/data/segments.geojson`, 2,5 Mo) :
+  - 767 plats (323 km) et 2269 côtes (497 km) ;
+  - tirés de l'extrait OSM du 29/09/2026 et du MNT LiDAR HD de l'IGN ;
+  - seuils calibrés sur ces données
+    ([`algorithm.md` § 11](docs/algorithm.md#11-déduplication-inter-strokes)).
 
-Reste à faire : lancer le pipeline sur les vraies données de la zone pilote,
-calibrer les seuils, valider sur le terrain et publier.
+Reste à faire : la validation terrain, avec la fiche
+[`docs/validation/pilot.md`](docs/validation/pilot.md) (20 segments).
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
@@ -79,9 +84,12 @@ Les données brutes et intermédiaires vont dans `data/` (ignoré par Git). Voir
 
 ```bash
 uv run flat-segments download-osm   # extrait Geofabrik (MD5) + découpe → data/raw/pilot.osm.pbf
-uv run flat-segments download-dem   # dalles RGE ALTI de l'emprise → data/raw/rge_alti/pilot.vrt
+uv run flat-segments download-dem   # dalles MNT LiDAR HD de l'emprise → data/raw/dem/pilot.vrt
 uv run flat-segments pipeline       # extract + elevation + detect + export → web/data/segments.geojson
 ```
+
+Si Geofabrik est inaccessible, `download-osm --url` accepte le miroir
+d'OpenStreetMap France (voir [`docs/data-sources.md`](docs/data-sources.md#téléchargement)).
 
 Chaque étape existe aussi séparément : `extract`, `elevation`, `detect` et
 `export`. Toutes acceptent un fichier de paramètres et des surcharges ponctuelles :
@@ -143,7 +151,7 @@ data/                 données téléchargées et produites (non versionné)
 
 - [Architecture](docs/architecture.md) : composants, flux de données, phases
 - [Algorithme](docs/algorithm.md) : détection des plats et des côtes, paramètres
-- [Sources de données](docs/data-sources.md) : OSM, RGE ALTI, projections, licences
+- [Sources de données](docs/data-sources.md) : OSM, MNT LiDAR HD et RGE ALTI, projections, licences
 - [Modèle de données](docs/data-model.md) : schéma d'un segment
 - [Décisions d'architecture (ADR)](docs/adr/README.md)
 
@@ -154,7 +162,7 @@ data/                 données téléchargées et produites (non versionné)
   base de données dérivée, diffusée sous
   [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/).
   © les contributeurs d'OpenStreetMap.
-- **Altitudes** : IGN – RGE ALTI®, [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
+- **Altitudes** : IGN – MNT LiDAR HD (RGE ALTI® en repli), [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
 - **Fond de carte** : [OpenFreeMap](https://openfreemap.org/), données © OpenStreetMap.
 
 Ces mentions sont aussi affichées sur la carte du site.

@@ -7,6 +7,7 @@ import {
   DEFAULT_CRITERIA,
   featuresBounds,
   filterSegments,
+  isLoop,
   parseLatLon,
   parseUrlState,
   sortResults,
@@ -82,7 +83,7 @@ function popupHtml(properties, distanceM) {
     ["D+ / D-", `${fmt(p.elev_gain_m, 1)} / ${fmt(p.elev_loss_m, 1)} m`],
     ["Traversées de route", fmt(p.n_crossings)],
     ["Carrefours", fmt(p.n_junctions)],
-    ["Sinuosité", fmt(p.sinuosity, 2)],
+    ["Sinuosité", isLoop(p) ? "boucle" : fmt(p.sinuosity, 2)],
     ["Revêtement", SURFACE_LABELS[p.surface] ?? p.surface],
     ["Éclairage", LIT_LABELS[p.lit] ?? p.lit],
     ["Longueurs cibles", p.fits_targets_m.length ? p.fits_targets_m.map(formatLength).join(", ") : "—"],
@@ -410,7 +411,9 @@ async function loadData() {
 
 function addAttribution(dataAttribution) {
   // Basemap attributions come from the style sources; segments derive from OSM.
-  const custom = [...new Set(["© contributeurs OpenStreetMap (ODbL)", ...dataAttribution])];
+  // Same wording as the pipeline export (export.OSM_ATTRIBUTION), so that the
+  // Set drops the duplicate.
+  const custom = [...new Set(["© les contributeurs d'OpenStreetMap (ODbL)", ...dataAttribution])];
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: custom }));
 }
 

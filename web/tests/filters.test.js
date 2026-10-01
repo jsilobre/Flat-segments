@@ -9,6 +9,8 @@ import {
   featuresBounds,
   filterSegments,
   haversineMeters,
+  isLoop,
+  LOOP_SINUOSITY,
   matches,
   parseLatLon,
   parseUrlState,
@@ -120,4 +122,11 @@ test("URL state: parse and build are inverse, invalid values ignored", () => {
   assert.deepEqual(parseUrlState("?kind=hill&lat=95&lon=1"), { id: null, kind: null, position: null });
   assert.deepEqual(parseUrlState("?lat=43.5"), { id: null, kind: null, position: null });
   assert.deepEqual(parseUrlState(""), { id: null, kind: null, position: null });
+});
+
+test("segments whose ends are close are shown as loops", () => {
+  assert.equal(isLoop({ sinuosity: null }), true); // closed ring
+  assert.equal(isLoop({ sinuosity: 225.7 }), true);
+  assert.equal(isLoop({ sinuosity: LOOP_SINUOSITY }), false);
+  assert.equal(isLoop({ sinuosity: 1.05 }), false);
 });

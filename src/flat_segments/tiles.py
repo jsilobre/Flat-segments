@@ -30,11 +30,11 @@ import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import IO, Any, Final
 
 import numpy as np
 
@@ -150,17 +150,23 @@ def _write_features(
 ) -> None:
     """Newline-delimited GeoJSON features (tippecanoe reads them in parallel)."""
     with path.open("w", encoding="utf-8") as handle:
-        for segment in segments:
-            props = tile_properties(segment)
-            if fields is not None:
-                props = {k: v for k, v in props.items() if k in fields}
-            coords = np.round(to_wgs84(segment.coords), COORD_DECIMALS).tolist()
-            feature = {
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coords},
-                "properties": props,
-            }
-            handle.write(json.dumps(feature, ensure_ascii=False, separators=(",", ":")) + "\n")
+        _append_features(segments, handle, to_wgs84, fields)
+
+
+def _append_features(
+    segments: Sequence[Segment], handle: IO[str], to_wgs84: Projector, fields: Sequence[str] | None
+) -> None:
+    for segment in segments:
+        props = tile_properties(segment)
+        if fields is not None:
+            props = {k: v for k, v in props.items() if k in fields}
+        coords = np.round(to_wgs84(segment.coords), COORD_DECIMALS).tolist()
+        feature = {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": props,
+        }
+        handle.write(json.dumps(feature, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
 def _run(args: list[str]) -> None:
@@ -185,12 +191,23 @@ def write_pmtiles(
     """
     check_tippecanoe()
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
-    path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="flat-segments-tiles-") as tmp:
         work = Path(tmp)
         detail_in, overview_in = work / "detail.geojsonl", work / "overview.geojsonl"
         _write_features(segments, detail_in, to_wgs84, None)
         _write_features(segments, overview_in, to_wgs84, OVERVIEW_FIELDS)
+        _build_pmtiles(detail_in, overview_in, path, attribution)
+    return path
+
+
+def _build_pmtiles(
+    detail_in: Path, overview_in: Path, path: Path, attribution: Sequence[str]
+) -> None:
+    """Run tippecanoe on the feature files of both layers, then tile-join."""
+    check_tippecanoe()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="flat-segments-tiles-") as tmp:
+        work = Path(tmp)
         detail, overview = work / "detail.pmtiles", work / "overview.pmtiles"
         common = ["tippecanoe", "--quiet", "--force", "--read-parallel"]
         _run(
@@ -229,7 +246,6 @@ def write_pmtiles(
                 str(overview),
             ]
         )
-    return path
 
 
 def _same(expected: Any, found: Any) -> bool:
@@ -283,13 +299,42 @@ def tileset_mismatches(
     return described + ([f"{missing} segments missing"] if missing else [])
 
 
+def verify_chunk(
+    path: Path, segments: Sequence[Segment], to_wgs84: Projector | None = None
+) -> tuple[list[str], set[str]]:
+    """Check the tiles around a chunk of segments (one département).
+
+    Returns:
+        The differences found for these segments (:func:`tileset_mismatches`),
+        and the ids of the other features read around them, to check that
+        they are known.
+    """
+    import pyogrio  # type: ignore[import-untyped]
+    from pyproj import Transformer
+
+    if not segments:
+        return [], set()
+    to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
+    lonlat = to_wgs84(np.vstack([s.coords for s in segments]))
+    to_mercator = Transformer.from_crs(WEB_CRS, "EPSG:3857", always_xy=True)
+    bbox = to_mercator.transform_bounds(*lonlat.min(axis=0), *lonlat.max(axis=0))
+    frame = pyogrio.read_dataframe(
+        path, layer=DETAIL_LAYER, read_geometry=False, ZOOM_LEVEL=DETAIL_ZOOMS[0], bbox=bbox
+    )
+    rows = frame.drop(columns=[c for c in ("mvt_id",) if c in frame.columns]).to_dict("records")
+    expected = {s.id: tile_properties(s) for s in segments}
+    mine = [row for row in rows if str(row.get("id")) in expected]
+    others = {str(row.get("id")) for row in rows} - set(expected)
+    return tileset_mismatches(expected, mine), others
+
+
 def verify_pmtiles(path: Path, segments: Sequence[Segment]) -> None:
     """Read the detail layer back at its first zoom and compare it with the segments.
 
     Raises:
         TilesetCheckError: If a segment is missing or a property differs.
     """
-    import pyogrio  # type: ignore[import-untyped]
+    import pyogrio
 
     frame = pyogrio.read_dataframe(
         path, layer=DETAIL_LAYER, read_geometry=False, ZOOM_LEVEL=DETAIL_ZOOMS[0]
@@ -353,14 +398,39 @@ def tileset_metadata(
     if segments:
         lonlat = to_wgs84(np.vstack([s.coords for s in segments]))
         bounds = [round(float(v), 5) for v in (*lonlat.min(axis=0), *lonlat.max(axis=0))]
+    return _metadata(
+        bounds=bounds,
+        counts={kind.value: sum(s.kind is kind for s in segments) for kind in SegmentKind},
+        attribution=list(attribution if attribution is not None else attribution_for(segments)),
+        sample=sample,
+        generated_at=generated_at,
+        params=params,
+        index_prefix=index_prefix,
+        tiles_url=tiles_url,
+        index_url=index_url,
+    )
+
+
+def _metadata(
+    *,
+    bounds: list[float] | None,
+    counts: Mapping[str, int],
+    attribution: list[str],
+    sample: bool,
+    generated_at: datetime | None,
+    params: Mapping[str, Any] | None,
+    index_prefix: int,
+    tiles_url: str,
+    index_url: str,
+) -> dict[str, Any]:
     generated_at = generated_at or datetime.now(UTC)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sample": sample,
-        "attribution": list(attribution if attribution is not None else attribution_for(segments)),
+        "attribution": attribution,
         "bounds": bounds,
-        "counts": {kind.value: sum(s.kind is kind for s in segments) for kind in SegmentKind},
+        "counts": dict(counts),
         "tiles": {
             "url": tiles_url,
             "layer": DETAIL_LAYER,
@@ -373,6 +443,170 @@ def tileset_metadata(
         },
         **({"params": dict(params)} if params is not None else {}),
     }
+
+
+class TilesetWriter:
+    """Write ``segments.pmtiles``, ``segments.json`` and ``ids/`` from chunks of segments.
+
+    Segments are given one chunk (département) at a time (:meth:`add`): their
+    features and index entries go to files at once, and only running totals
+    stay in memory (bounds, counts, ids). :meth:`close` builds the tiles, checks
+    them chunk by chunk, then writes the index and the metadata.
+    """
+
+    def __init__(
+        self,
+        directory: Path,
+        *,
+        sample: bool = False,
+        generated_at: datetime | None = None,
+        attribution: Sequence[str] | None = None,
+        params: Mapping[str, Any] | None = None,
+        tiles_url: str = "segments.pmtiles",
+        index_url: str = "ids",
+    ) -> None:
+        self.files = TilesetFiles(
+            directory / "segments.pmtiles", directory / "segments.json", directory / "ids"
+        )
+        self.options: dict[str, Any] = {
+            "sample": sample,
+            "generated_at": generated_at,
+            "params": params,
+            "tiles_url": tiles_url,
+            "index_url": index_url,
+        }
+        self.attribution = attribution
+        self.to_wgs84 = make_projector(WORK_CRS, WEB_CRS)
+        self._tmp = tempfile.TemporaryDirectory(prefix="flat-segments-tiles-")
+        self.work = Path(self._tmp.name)
+        self._detail = (self.work / "detail.geojsonl").open("w", encoding="utf-8")
+        self._overview = (self.work / "overview.geojsonl").open("w", encoding="utf-8")
+        self._buckets: dict[str, IO[str]] = {}  # index entries by first 2 hex characters
+        self.ids: set[str] = set()
+        self.n_entries = 0
+        self.counts = dict.fromkeys((kind.value for kind in SegmentKind), 0)
+        self.lonlat_min = np.full(2, np.inf)
+        self.lonlat_max = np.full(2, -np.inf)
+        self._by_source: dict[str, Segment] = {}  # one segment per elevation source
+
+    @property
+    def total(self) -> int:
+        """Number of segments added."""
+        return len(self.ids)
+
+    def _entry(self, segment_id: str, value: list[Any]) -> None:
+        key = index_key(segment_id, INDEX_PREFIX_LENGTH)
+        if key not in self._buckets:
+            self._buckets[key] = (self.work / f"index-{key}.jsonl").open("w", encoding="utf-8")
+        self._buckets[key].write(json.dumps([segment_id, value], separators=(",", ":")) + "\n")
+        self.n_entries += 1
+
+    def add(self, segments: Sequence[Segment]) -> None:
+        """Add a chunk of segments (with their final ids).
+
+        Raises:
+            ValueError: If a segment id was already added.
+        """
+        for segment in segments:
+            if segment.id in self.ids:
+                raise ValueError(f"duplicate segment ids across the files: {segment.id}")
+            self.ids.add(segment.id)
+            self.counts[segment.kind.value] += 1
+            self._by_source.setdefault(segment.elevation_source, segment)
+            mid = self.to_wgs84(segment.coords[len(segment.coords) // 2][None, :])[0]
+            self._entry(segment.id, [round(float(v), 5) for v in mid])
+        if segments:
+            lonlat = self.to_wgs84(np.vstack([s.coords for s in segments]))
+            self.lonlat_min = np.minimum(self.lonlat_min, lonlat.min(axis=0))
+            self.lonlat_max = np.maximum(self.lonlat_max, lonlat.max(axis=0))
+        _append_features(segments, self._detail, self.to_wgs84, None)
+        _append_features(segments, self._overview, self.to_wgs84, OVERVIEW_FIELDS)
+
+    def add_redirects(self, redirects: Mapping[str, Redirect]) -> None:
+        """Add the ids of earlier versions (``[lon, lat, target]`` in the index)."""
+        for segment_id, redirect in redirects.items():
+            lon, lat = redirect.position
+            self._entry(segment_id, [lon, lat, redirect.target])
+
+    def metadata(self) -> dict[str, Any]:
+        """Content of ``segments.json`` for the segments added."""
+        bounds = None
+        if self.ids:
+            bounds = [round(float(v), 5) for v in (*self.lonlat_min, *self.lonlat_max)]
+        return _metadata(
+            bounds=bounds,
+            counts=self.counts,
+            attribution=list(
+                self.attribution
+                if self.attribution is not None
+                else attribution_for(list(self._by_source.values()))
+            ),
+            index_prefix=index_prefix_length(self.n_entries),
+            **self.options,
+        )
+
+    def close(self, chunks: Callable[[], Iterable[Sequence[Segment]]]) -> TilesetFiles:
+        """Build and check the tiles, then write the index and the metadata.
+
+        Args:
+            chunks: Gives the segments again, chunk by chunk, with their final
+                ids, to check the tiles.
+
+        Raises:
+            TippecanoeError: If the tools are missing, too old or fail, or if
+                the tiles do not hold the segments (``TilesetCheckError``).
+        """
+        try:
+            self._detail.close()
+            self._overview.close()
+            metadata = self.metadata()
+            _build_pmtiles(
+                self.work / "detail.geojsonl",
+                self.work / "overview.geojsonl",
+                self.files.pmtiles,
+                metadata["attribution"],
+            )
+            problems: list[str] = []
+            others: set[str] = set()
+            for chunk in chunks():
+                found, around = verify_chunk(self.files.pmtiles, chunk, self.to_wgs84)
+                problems += found
+                others |= around
+            problems += [f"unknown feature id {i!r}" for i in sorted(others - self.ids)[:5]]
+            if problems:
+                raise TilesetCheckError(
+                    f"{self.files.pmtiles} does not hold the segments: " + "; ".join(problems[:8])
+                )
+            self._write_index(metadata["tiles"]["index_prefix_length"])
+            self.files.metadata.write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+            )
+        finally:
+            self.cleanup()
+        return self.files
+
+    def _write_index(self, prefix_length: int) -> None:
+        directory = self.files.index_dir
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True)
+        for handle in self._buckets.values():
+            handle.close()
+        for bucket in sorted(self.work.glob("index-*.jsonl")):
+            shards: dict[str, dict[str, Any]] = defaultdict(dict)
+            with bucket.open(encoding="utf-8") as handle:
+                for line in handle:
+                    segment_id, value = json.loads(line)
+                    shards[index_key(segment_id, prefix_length)][segment_id] = value
+            for key, entries in shards.items():
+                text = json.dumps(dict(sorted(entries.items())), separators=(",", ":"))
+                (directory / f"{key}.json").write_text(text + "\n", encoding="utf-8")
+
+    def cleanup(self) -> None:
+        """Remove the work files."""
+        for handle in (self._detail, self._overview, *self._buckets.values()):
+            handle.close()
+        self._tmp.cleanup()
 
 
 def write_tileset(
@@ -395,26 +629,19 @@ def write_tileset(
         TippecanoeError: If the tools are missing, too old or fail, or if the
             tiles do not hold the segments (``TilesetCheckError``).
     """
-    to_wgs84 = make_projector(WORK_CRS, WEB_CRS)
-    prefix = index_prefix_length(len(segments) + len(redirects or {}))
-    metadata = tileset_metadata(
-        segments,
+    writer = TilesetWriter(
+        directory,
         sample=sample,
         generated_at=generated_at,
         attribution=attribution,
         params=params,
-        to_wgs84=to_wgs84,
-        index_prefix=prefix,
         tiles_url=tiles_url,
         index_url=index_url,
     )
-    files = TilesetFiles(
-        directory / "segments.pmtiles", directory / "segments.json", directory / "ids"
-    )
-    write_pmtiles(segments, files.pmtiles, metadata["attribution"], to_wgs84)
-    verify_pmtiles(files.pmtiles, segments)
-    write_id_index(segments, files.index_dir, to_wgs84, redirects=redirects, prefix_length=prefix)
-    files.metadata.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
-    )
-    return files
+    try:
+        writer.add(segments)
+        writer.add_redirects(redirects or {})
+    except BaseException:
+        writer.cleanup()
+        raise
+    return writer.close(lambda: [segments])

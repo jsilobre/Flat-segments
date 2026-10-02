@@ -94,11 +94,12 @@ class Lineage:
     renamed: int  # new segments whose own id was taken
     aliased: int  # previous ids now redirected to another segment
     retired: int  # previous ids now naming nothing
+    total: int = 0  # segments given a final id
 
     @property
     def summary(self) -> str:
         """One line for the logs."""
-        new = len(self.segments) - self.kept
+        new = self.total - self.kept
         return (
             f"{self.kept} ids kept, {new} new ({self.renamed} renamed), "
             f"{self.aliased} redirected, {self.retired} retired, "
@@ -129,6 +130,67 @@ def read_previous(directory: Path, layer: str = "segments") -> PreviousVersion |
             for i, geometry in zip(merged.index, merged.geometry, strict=True)
         )
     return PreviousVersion(segments, read_redirects(directory / "ids"))
+
+
+#: Margin around a chunk when reading the previous segments, in metres: a
+#: previous segment crossing the chunk extent is read whole.
+PREVIOUS_MARGIN_M: Final = 5000.0
+
+
+@dataclass(frozen=True)
+class PublishedTileset:
+    """A published version, read chunk by chunk (:meth:`segments_in`)."""
+
+    pmtiles: Path
+    live: Mapping[str, tuple[float, float]]  # id -> [lon, lat] of the segments
+    redirects: Mapping[str, Redirect]
+    layer: str = "segments"
+
+    def segments_in(
+        self, bounds_l93: tuple[float, float, float, float], margin_m: float = PREVIOUS_MARGIN_M
+    ) -> list[PreviousSegment]:
+        """Previous segments around a Lambert-93 extent (pieces merged back)."""
+        import geopandas as gpd
+        from pyproj import Transformer
+
+        min_x, min_y, max_x, max_y = bounds_l93
+        to_mercator = Transformer.from_crs(WORK_CRS, "EPSG:3857", always_xy=True)
+        bbox = to_mercator.transform_bounds(
+            min_x - margin_m, min_y - margin_m, max_x + margin_m, max_y + margin_m
+        )
+        frame = gpd.read_file(
+            self.pmtiles, layer=self.layer, columns=["id"], bbox=bbox, engine="pyogrio"
+        )
+        frame = frame[frame["id"].map(is_segment_id)]
+        if not len(frame):
+            return []
+        merged = frame.to_crs(WORK_CRS).dissolve(by="id")
+        return [
+            PreviousSegment(str(i), str(i).split("-")[0], shapely.line_merge(geometry))
+            for i, geometry in zip(merged.index, merged.geometry, strict=True)
+        ]
+
+
+def open_previous(directory: Path) -> PublishedTileset | None:
+    """The version published in ``directory`` (``segments.pmtiles``, ``ids/``), or None."""
+    pmtiles = directory / "segments.pmtiles"
+    if not pmtiles.exists():
+        return None
+    live, redirects = read_index(directory / "ids")
+    return PublishedTileset(pmtiles, live, redirects)
+
+
+def read_index(index_dir: Path) -> tuple[dict[str, tuple[float, float]], dict[str, Redirect]]:
+    """Segments (id -> position) and redirects of a published id index.
+
+    Entries that are not segment ids, or whose target is not one, are left out.
+    """
+    live: dict[str, tuple[float, float]] = {}
+    for path in sorted(index_dir.glob("*.json")):
+        for segment_id, entry in json.loads(path.read_text(encoding="utf-8")).items():
+            if len(entry) == 2 and is_segment_id(segment_id):
+                live[segment_id] = (float(entry[0]), float(entry[1]))
+    return live, read_redirects(index_dir)
 
 
 def read_redirects(index_dir: Path) -> dict[str, Redirect]:
@@ -181,6 +243,126 @@ def _free_id(segment_id: str, taken: set[str]) -> str:
     return candidate
 
 
+class Matcher:
+    """Give final ids to segments added chunk by chunk (one département at a time).
+
+    Only light state is kept between chunks: the previous ids with their
+    position, the ids taken so far, the best redirect candidate of each
+    previous id. A chunk is matched with the previous segments around it
+    (``previous`` given to :meth:`add`), so the whole set never has to be in
+    memory (docs/phase-2/2.5-france.md).
+    """
+
+    def __init__(
+        self,
+        previous_live: Mapping[str, tuple[float, float]],
+        previous_redirects: Mapping[str, Redirect],
+        *,
+        buffer_m: float = BUFFER_M,
+        match_min: float = MATCH_MIN,
+        alias_min: float = ALIAS_MIN,
+        to_wgs84: Any = None,
+    ) -> None:
+        from flat_segments.geometry import make_projector
+
+        self.previous_live = previous_live
+        self.previous_redirects = previous_redirects
+        self.buffer_m, self.match_min, self.alias_min = buffer_m, match_min, alias_min
+        self.to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
+        self.kept: set[str] = set()
+        self.taken: set[str] = set(previous_live) | set(previous_redirects)
+        # previous id -> (share covered, target id, target position)
+        self.best_alias: dict[str, tuple[float, str, tuple[float, float]]] = {}
+        # Positions of the targets of earlier redirects, once kept.
+        self.wanted = {r.target for r in previous_redirects.values() if r.target}
+        self.positions: dict[str, tuple[float, float]] = {}
+        self.total = self.renamed = 0
+
+    def _lonlat(self, geometry: BaseGeometry) -> tuple[float, float]:
+        lon, lat = self.to_wgs84(np.array([_midpoint(geometry)]))[0]
+        return round(float(lon), 5), round(float(lat), 5)
+
+    def add(self, current: Sequence[Segment], previous: Sequence[PreviousSegment]) -> list[Segment]:
+        """Final ids of a chunk of segments; ``previous``: the previous segments around it."""
+        geometries = [LineString(s.coords) for s in current]
+        candidates = [p for p in previous if p.id in self.previous_live and p.id not in self.kept]
+        final: dict[int, str] = {}  # current index -> previous id kept
+        aliases: list[tuple[float, int, str]] = []  # (share, current index, previous id)
+        by_kind_prev: dict[str, list[int]] = defaultdict(list)
+        for j, p in enumerate(candidates):
+            by_kind_prev[p.kind].append(j)
+        by_kind_cur: dict[str, list[int]] = defaultdict(list)
+        for i, s in enumerate(current):
+            by_kind_cur[s.kind.value].append(i)
+
+        for kind, cur_idx in by_kind_cur.items():
+            prev_idx = by_kind_prev.get(kind, [])
+            pair_cur, pair_prev, cur_share, prev_share = _pairs(
+                [geometries[k] for k in cur_idx],
+                [candidates[k].geometry for k in prev_idx],
+                self.buffer_m,
+            )
+            score = np.minimum(cur_share, prev_share)
+            used_cur: set[int] = set()
+            for k in np.lexsort((-np.maximum(cur_share, prev_share), -score)):
+                if score[k] < self.match_min:
+                    break
+                ci, pid = cur_idx[pair_cur[k]], candidates[prev_idx[pair_prev[k]]].id
+                if ci not in used_cur and pid not in self.kept:
+                    used_cur.add(ci)
+                    self.kept.add(pid)
+                    final[ci] = pid
+            for k in range(len(pair_cur)):
+                if prev_share[k] >= self.alias_min:
+                    pid = candidates[prev_idx[pair_prev[k]]].id
+                    aliases.append((float(prev_share[k]), cur_idx[pair_cur[k]], pid))
+
+        # Final ids: kept ones, then the others, avoiding every known id.
+        for i, segment in enumerate(current):
+            if i in final:
+                continue
+            final[i] = _free_id(segment.id, self.taken)
+            self.taken.add(final[i])
+            self.renamed += final[i] != segment.id
+        for share, i, pid in aliases:
+            if pid not in self.kept and share > self.best_alias.get(pid, (-1.0,))[0]:
+                self.best_alias[pid] = (share, final[i], self._lonlat(geometries[i]))
+        for i, segment_id in final.items():
+            if segment_id in self.wanted:
+                self.positions[segment_id] = self._lonlat(geometries[i])
+        self.total += len(current)
+        return [s if final[i] == s.id else replace(s, id=final[i]) for i, s in enumerate(current)]
+
+    def finish(self) -> Lineage:
+        """Redirects of the previous ids not kept, and of the earlier redirects."""
+        redirects: dict[str, Redirect] = {}
+        aliased = retired = 0
+        for pid, position in self.previous_live.items():
+            if pid in self.kept:
+                continue
+            if pid in self.best_alias:
+                _, alias_target, alias_position = self.best_alias[pid]
+                redirects[pid] = Redirect(alias_target, alias_position)
+                aliased += 1
+            else:
+                redirects[pid] = Redirect(None, position)
+                retired += 1
+        # Earlier redirects: follow their target (a previous segment) to this version.
+        for old_id, redirect in self.previous_redirects.items():
+            target = redirect.target
+            if target is None:
+                redirects[old_id] = redirect
+            elif target in self.kept:
+                redirects[old_id] = Redirect(target, self.positions[target])
+            elif target in redirects:
+                redirects[old_id] = redirects[target]
+            else:  # not a previous segment: inconsistent index, keep the place only
+                redirects[old_id] = Redirect(None, redirect.position)
+        return Lineage(
+            (), redirects, len(self.kept), self.renamed, aliased, retired, total=self.total
+        )
+
+
 def match(
     current: Sequence[Segment],
     previous: PreviousVersion | None,
@@ -190,90 +372,19 @@ def match(
     alias_min: float = ALIAS_MIN,
     to_wgs84: Any = None,
 ) -> Lineage:
-    """Give the current segments their final ids, and list the redirects."""
-    from flat_segments.geometry import make_projector
-
+    """Give the current segments their final ids, and list the redirects (one chunk)."""
     if previous is None:
-        return Lineage(tuple(current), {}, 0, 0, 0, 0)
-    to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
-    geometries = [LineString(s.coords) for s in current]
-
-    final: dict[int, str] = {}  # current index -> previous id kept
-    best_alias: dict[int, tuple[float, int]] = {}  # previous index -> (share, current index)
-    by_kind_prev: dict[str, list[int]] = defaultdict(list)
-    for j, p in enumerate(previous.segments):
-        by_kind_prev[p.kind].append(j)
-    by_kind_cur: dict[str, list[int]] = defaultdict(list)
-    for i, s in enumerate(current):
-        by_kind_cur[s.kind.value].append(i)
-
-    for kind, cur_idx in by_kind_cur.items():
-        prev_idx = by_kind_prev.get(kind, [])
-        pair_cur, pair_prev, cur_share, prev_share = _pairs(
-            [geometries[k] for k in cur_idx],
-            [previous.segments[k].geometry for k in prev_idx],
-            buffer_m,
-        )
-        score = np.minimum(cur_share, prev_share)
-        used_cur: set[int] = set()
-        used_prev: set[int] = set()
-        for k in np.lexsort((-np.maximum(cur_share, prev_share), -score)):
-            if score[k] < match_min:
-                break
-            ci, pj = cur_idx[pair_cur[k]], prev_idx[pair_prev[k]]
-            if ci not in used_cur and pj not in used_prev:
-                used_cur.add(ci)
-                used_prev.add(pj)
-                final[ci] = previous.segments[pj].id
-        for k in range(len(pair_cur)):
-            ci, pj = cur_idx[pair_cur[k]], prev_idx[pair_prev[k]]
-            if pj in used_prev or prev_share[k] < alias_min:
-                continue
-            if pj not in best_alias or prev_share[k] > best_alias[pj][0]:
-                best_alias[pj] = (float(prev_share[k]), ci)
-
-    # Final ids: kept ones first, then the others, avoiding every known id.
-    kept_ids = set(final.values())
-    taken = kept_ids | {p.id for p in previous.segments} | set(previous.redirects)
-    renamed = 0
-    for i, segment in enumerate(current):
-        if i in final:
-            continue
-        final[i] = _free_id(segment.id, taken)
-        taken.add(final[i])
-        renamed += final[i] != segment.id
-    segments = tuple(
-        s if final[i] == s.id else replace(s, id=final[i]) for i, s in enumerate(current)
+        return Lineage(tuple(current), {}, 0, 0, 0, 0, total=len(current))
+    matcher = Matcher(
+        {},
+        previous.redirects,
+        buffer_m=buffer_m,
+        match_min=match_min,
+        alias_min=alias_min,
+        to_wgs84=to_wgs84,
     )
-    index_of = {segment_id: i for i, segment_id in final.items()}
-
-    def lonlat(geometry: BaseGeometry) -> tuple[float, float]:
-        lon, lat = to_wgs84(np.array([_midpoint(geometry)]))[0]
-        return round(float(lon), 5), round(float(lat), 5)
-
-    def towards(target: str) -> Redirect:
-        return Redirect(target, lonlat(geometries[index_of[target]]))
-
-    redirects: dict[str, Redirect] = {}
-    aliased = retired = 0
-    for j, p in enumerate(previous.segments):
-        if p.id in kept_ids:
-            continue
-        if j in best_alias:
-            redirects[p.id] = towards(final[best_alias[j][1]])
-            aliased += 1
-        else:
-            redirects[p.id] = Redirect(None, lonlat(p.geometry))
-            retired += 1
-    # Earlier redirects: follow their target (a previous segment) to this version.
-    for old_id, redirect in previous.redirects.items():
-        target = redirect.target
-        if target is None:
-            redirects[old_id] = redirect
-        elif target in kept_ids:
-            redirects[old_id] = towards(target)
-        elif target in redirects:
-            redirects[old_id] = redirects[target]
-        else:  # not a previous segment: inconsistent index, keep the place only
-            redirects[old_id] = Redirect(None, redirect.position)
-    return Lineage(segments, redirects, len(kept_ids), renamed, aliased, retired)
+    matcher.previous_live = {p.id: matcher._lonlat(p.geometry) for p in previous.segments}
+    matcher.taken |= set(matcher.previous_live)
+    segments = matcher.add(current, previous.segments)
+    result = matcher.finish()
+    return replace(result, segments=tuple(segments))

@@ -9,8 +9,8 @@ parameters used by ``detect`` are saved next to its output
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -144,6 +144,10 @@ def run_publish(
     (``lineage.py``). ``tiles_url`` and ``index_url`` say where the page will
     find the tiles and the index (``segments.json``).
 
+    The files are processed one at a time (matching with the previous
+    segments around them, then writing): the memory needed is that of the
+    largest file, not of the whole set.
+
     Returns:
         ``(number of segments, files written, id matching or None)``.
 
@@ -153,8 +157,8 @@ def run_publish(
         TippecanoeError: If tippecanoe is missing or fails.
     """
     from flat_segments.export import read_segments
-    from flat_segments.lineage import match, read_previous
-    from flat_segments.tiles import write_tileset
+    from flat_segments.lineage import Matcher, open_previous
+    from flat_segments.tiles import TilesetWriter
 
     sidecars = {
         params_sidecar(f).read_text(encoding="utf-8")
@@ -163,25 +167,52 @@ def run_publish(
     }
     if len(sidecars) > 1:
         raise ValueError("segments produced with different parameters cannot be published together")
-    segments = [s for f in segments_files for s in read_segments(f)]
-    ids = [s.id for s in segments]
-    if len(set(ids)) != len(ids):
-        raise ValueError("duplicate segment ids across the files")
     params = tomllib.loads(sidecars.pop()) if sidecars else None
-    lineage = None
-    if previous is not None:
-        lineage = match(segments, read_previous(previous))
-        segments = list(lineage.segments)
-    files = write_tileset(
-        segments,
-        out_dir,
-        sample=sample,
-        params=params,
-        redirects=lineage.redirects if lineage else None,
-        tiles_url=tiles_url,
-        index_url=index_url,
+    published = open_previous(previous) if previous is not None else None
+    matcher = Matcher(published.live, published.redirects) if published else None
+    writer = TilesetWriter(
+        out_dir, sample=sample, params=params, tiles_url=tiles_url, index_url=index_url
     )
-    return len(segments), files, lineage
+    renamed: list[dict[str, str]] = []  # per file: own id -> final id, when they differ
+    own_ids: set[str] = set()
+    try:
+        for path in segments_files:
+            segments = read_segments(path)
+            for segment in segments:
+                if segment.id in own_ids:
+                    raise ValueError(f"duplicate segment ids across the files: {segment.id}")
+                own_ids.add(segment.id)
+            final = segments
+            if matcher is not None and published is not None and segments:
+                around = published.segments_in(_bounds(segments))
+                final = matcher.add(segments, around)
+            renamed.append(
+                {s.id: f.id for s, f in zip(segments, final, strict=True) if s.id != f.id}
+            )
+            writer.add(final)
+        lineage = matcher.finish() if matcher is not None else None
+        if lineage is not None:
+            writer.add_redirects(lineage.redirects)
+    except BaseException:
+        writer.cleanup()
+        raise
+
+    def chunks() -> Iterator[list[Segment]]:
+        for path, ids in zip(segments_files, renamed, strict=True):
+            yield [replace(s, id=ids[s.id]) if s.id in ids else s for s in read_segments(path)]
+
+    files = writer.close(chunks)
+    return writer.total, files, lineage
+
+
+def _bounds(segments: Sequence[Segment]) -> tuple[float, float, float, float]:
+    """Lambert-93 extent of segments."""
+    import numpy as np
+
+    coords = np.vstack([s.coords for s in segments])
+    min_x, min_y = coords.min(axis=0)
+    max_x, max_y = coords.max(axis=0)
+    return float(min_x), float(min_y), float(max_x), float(max_y)
 
 
 def run_all(

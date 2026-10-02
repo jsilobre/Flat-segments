@@ -179,3 +179,45 @@ def test_damaged_ids_of_a_published_index_are_left_out(tmp_path: Path) -> None:
         "flat-0123456789ab": Redirect("flat-0123456789ac", (1.5, 43.5)),
         "climb-0123456789ab": Redirect(None, (1.5, 43.5)),
     }
+
+
+def test_matcher_works_chunk_by_chunk() -> None:
+    kept_later = seg("flat-aaaaaaaaaaaa", 0, 500)
+    shared = seg("flat-bbbbbbbbbbbb", 0, 500, y=900)
+    matcher = lineage.Matcher(
+        {"flat-aaaaaaaaaaaa": (1.5, 43.5), "flat-bbbbbbbbbbbb": (1.5, 43.6)}, {}
+    )
+    # Chunk 1: half of A (a redirect candidate only) and a copy of B (kept).
+    first = matcher.add(
+        [seg("flat-111111111111", 0, 250), seg("flat-222222222222", 0, 500, y=900)],
+        [prev(kept_later), prev(shared)],
+    )
+    # Chunk 2: A again (kept now), B again (already kept: a new id).
+    second = matcher.add(
+        [seg("flat-333333333333", 2, 500), seg("flat-444444444444", 0, 500, y=901)],
+        [prev(kept_later), prev(shared)],
+    )
+    assert [s.id for s in first] == ["flat-111111111111", "flat-bbbbbbbbbbbb"]
+    assert [s.id for s in second] == ["flat-aaaaaaaaaaaa", "flat-444444444444"]
+    result = matcher.finish()
+    assert result.redirects == {}
+    assert (result.kept, result.total) == (2, 4)
+
+
+@needs_tippecanoe
+def test_publishing_several_files_matches_each_around_itself(tmp_path: Path) -> None:
+    out = tmp_path / "web"
+    west, east = seg("flat-aaaaaaaaaaaa", 0, 500), seg("flat-bbbbbbbbbbbb", 30_000, 30_500)
+    run_publish([write_run(tmp_path / "v1", [west, east])], out)
+    v2 = [
+        write_run(tmp_path / "w", [seg("flat-111111111111", 3, 498, y=2)]),
+        write_run(tmp_path / "e", [seg("flat-222222222222", 30_002, 30_495, y=1)]),
+    ]
+    count, files, result = run_publish(v2, out, previous=out)
+    assert count == 2
+    assert result is not None
+    assert (result.kept, result.renamed, result.redirects) == (2, 0, {})
+    entries: dict[str, list[object]] = {}
+    for path in files.index_dir.glob("*.json"):
+        entries.update(json.loads(path.read_text()))
+    assert set(entries) == {"flat-aaaaaaaaaaaa", "flat-bbbbbbbbbbbb"}

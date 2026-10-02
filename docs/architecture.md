@@ -89,6 +89,7 @@ Le découpage en quatre étapes permet de régler les seuils de détection
 | `download-departments` | WFS de la Géoplateforme (Admin Express) | `data/raw/departements.geojson` | `departments.py` |
 | `department CODE` | extrait OSM régional + contours | `data/departments/CODE/` : `strokes.parquet`, `profiles.parquet`, `segments.parquet`, `state.json` | `batch.py`, `departments.py` |
 | `departments CODE…` | idem, plusieurs départements | idem, plus un récapitulatif | `batch.py` |
+| `renumber-osm PBF OUT` | extrait OSM | copie dont les nœuds sont numérotés à partir de 1, voies inchangées (mémoire d'osmium pour `cut-osm`) | `osm_extracts.py` (osmium) |
 | `cut-osm PBF [CODE…]` | extrait OSM national + contours | `data/osm/CODE.osm.pbf` : un extrait par département (contour élargi, voies entières), par lots | `osm_extracts.py` (osmium) |
 | `department-codes [CODE…]` | contours | liste JSON des codes (toute la métropole par défaut), pour le workflow | `departments.py` |
 | `department-summary STATE…` | `state.json` de départements traités | tableau récapitulatif (Markdown) | `batch.py` |

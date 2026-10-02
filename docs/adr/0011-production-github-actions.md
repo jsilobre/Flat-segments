@@ -34,8 +34,17 @@ tâches peuvent tourner en parallèle.
   1. **Préparation** :
      - téléchargement de l'extrait OSM France, depuis Geofabrik, ou le miroir
        d'OpenStreetMap France en secours ;
+     - renumérotation des nœuds à partir de 1 (commande `renumber-osm`) :
+       osmium réserve, par extrait découpé, une mémoire proportionnelle au
+       plus grand identifiant de nœud. Cela fait 3,7 Go par département avec
+       les identifiants d'OSM (plus de 14 milliards), et un premier lancement
+       sur 8 départements a épuisé les 16 Go du *runner*. Les voies gardent
+       leurs identifiants OSM, les seuls publiés, et le réseau construit est
+       identique (vérifié sur la Haute-Garonne : mêmes voies, *strokes*,
+       traversées et carrefours) ;
      - découpe par département avec osmium (commande `cut-osm`), en lots de 12
-       départements par passage ;
+       départements par passage. Après renumérotation, 8 départements
+       tiennent dans 1,9 Go sur l'extrait régional ;
      - dépôt des extraits dans la release `osm-extracts` (fichiers
        intermédiaires, remplacés à chaque lancement).
   2. **Une tâche par département** :

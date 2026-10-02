@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,22 @@ def test_cut_osm_command(tmp_path: Path, outlines: Path) -> None:
         cli.app, ["department-codes", "12", "--departments-file", str(outlines)]
     )
     assert bad.exit_code != 0
+
+
+def test_department_summary_command(tmp_path: Path) -> None:
+    states = []
+    for code, minutes in (("81", 2), ("31", 30)):
+        path = tmp_path / code / "state.json"
+        path.parent.mkdir()
+        steps = {
+            "dem": {"seconds": minutes * 60, "tiles": 5},
+            "segments": {"flats": 3, "climbs": 4},
+        }
+        path.write_text(json.dumps({"code": code, "name": f"D{code}", "steps": steps}))
+        states.append(str(path))
+    result = CliRunner().invoke(cli.app, ["department-summary", *states])
+    assert result.exit_code == 0, result.output
+    rows = result.output.splitlines()[2:]
+    assert rows[0].startswith("| 31 D31 |")
+    assert "| 30.0 | ok |" in rows[0]
+    assert rows[1].startswith("| 81 D81 |")

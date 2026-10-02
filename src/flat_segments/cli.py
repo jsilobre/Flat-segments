@@ -420,6 +420,22 @@ def department_codes(
     typer.echo(json.dumps(codes or dep.department_codes(departments_file)))
 
 
+@app.command("department-summary")
+def department_summary(
+    states: Annotated[
+        list[Path], typer.Argument(help="state.json files of processed départements.", exists=True)
+    ],
+) -> None:
+    """Print the Markdown summary table of processed départements."""
+    import json
+
+    from flat_segments.batch import summary_table
+
+    loaded = [json.loads(path.read_text(encoding="utf-8")) for path in states]
+    table = {state["code"]: state for state in sorted(loaded, key=lambda state: state["code"])}
+    typer.echo(summary_table(table), nl=False)
+
+
 @app.command("cut-osm")
 def cut_osm(
     pbf: Annotated[Path, typer.Argument(help="National OSM extract.", exists=True, dir_okay=False)],

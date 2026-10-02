@@ -271,6 +271,14 @@ export function resolveIndexEntry(id, entry) {
   return target ? { status: "moved", id: target, position } : { status: "retired", id: null, position };
 }
 
+/**
+ * Address of a published file: `path` is relative to the folder of
+ * segments.json (`base`, an absolute URL), or absolute (data on R2, ADR 0013).
+ */
+export function dataUrl(base, path) {
+  return new URL(path, base).href;
+}
+
 /** Name of the index file giving the position of a segment id (see tiles.py). */
 export function indexKey(id, prefixLength = 2) {
   return String(id).split("-")[1]?.slice(0, prefixLength) ?? "";

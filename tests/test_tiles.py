@@ -62,7 +62,16 @@ def test_tileset_metadata() -> None:
     assert west < east
     assert south < north
     assert metadata["tiles"]["minzoom"] == 12
+    assert metadata["tiles"]["url"] == "segments.pmtiles"
+    assert metadata["tiles"]["index"] == "ids"
     assert metadata["params"] == {"a": 1}
+    elsewhere = tiles.tileset_metadata(
+        segments,
+        tiles_url="https://pub-x.r2.dev/tiles/segments-1.pmtiles",
+        index_url="https://pub-x.r2.dev/ids/1",
+    )
+    assert elsewhere["tiles"]["url"] == "https://pub-x.r2.dev/tiles/segments-1.pmtiles"
+    assert elsewhere["tiles"]["index"] == "https://pub-x.r2.dev/ids/1"
 
 
 @needs_tippecanoe

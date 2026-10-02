@@ -340,8 +340,14 @@ def tileset_metadata(
     params: Mapping[str, Any] | None = None,
     to_wgs84: Projector | None = None,
     index_prefix: int = INDEX_PREFIX_LENGTH,
+    tiles_url: str = "segments.pmtiles",
+    index_url: str = "ids",
 ) -> dict[str, Any]:
-    """Content of ``segments.json`` (see docs/data-model.md)."""
+    """Content of ``segments.json`` (see docs/data-model.md).
+
+    ``tiles_url`` and ``index_url`` are relative to ``segments.json``, or
+    absolute when the data is published elsewhere (ADR 0013).
+    """
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
     bounds = None
     if segments:
@@ -356,13 +362,13 @@ def tileset_metadata(
         "bounds": bounds,
         "counts": {kind.value: sum(s.kind is kind for s in segments) for kind in SegmentKind},
         "tiles": {
-            "url": "segments.pmtiles",
+            "url": tiles_url,
             "layer": DETAIL_LAYER,
             "minzoom": DETAIL_ZOOMS[0],
             "maxzoom": DETAIL_ZOOMS[1],
             "overview_layer": OVERVIEW_LAYER,
             "overview_minzoom": OVERVIEW_ZOOMS[0],
-            "index": "ids",
+            "index": index_url,
             "index_prefix_length": index_prefix,
         },
         **({"params": dict(params)} if params is not None else {}),
@@ -378,6 +384,8 @@ def write_tileset(
     attribution: Sequence[str] | None = None,
     params: Mapping[str, Any] | None = None,
     redirects: Mapping[str, Redirect] | None = None,
+    tiles_url: str = "segments.pmtiles",
+    index_url: str = "ids",
 ) -> TilesetFiles:
     """Write ``segments.pmtiles``, ``segments.json`` and ``ids/`` in ``directory``.
 
@@ -397,6 +405,8 @@ def write_tileset(
         params=params,
         to_wgs84=to_wgs84,
         index_prefix=prefix,
+        tiles_url=tiles_url,
+        index_url=index_url,
     )
     files = TilesetFiles(
         directory / "segments.pmtiles", directory / "segments.json", directory / "ids"

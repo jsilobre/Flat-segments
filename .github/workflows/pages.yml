@@ -35,12 +35,16 @@ jobs:
           mkdir -p _site
           cp web/index.html web/app.js web/filters.js web/geocode.js web/tiles.js web/style.css _site/
           cp -r web/data _site/data
-      - name: Published data (release data-latest, from the Production workflow)
+      - name: Published data (R2, else the release data-latest)
         env:
           GH_TOKEN: ${{ github.token }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
         run: |
-          # Without the release, the page falls back on the sample set (ADR 0011).
-          if gh release download data-latest --dir release; then
+          # On R2, only segments.json is deployed: it points to the tiles and the
+          # index there (ADR 0013). Without data, the page falls back on the sample.
+          if [ -n "$R2_PUBLIC_URL" ] && curl -sSf -o r2-segments.json "${R2_PUBLIC_URL%/}/segments.json"; then
+            cp r2-segments.json _site/data/segments.json
+          elif gh release download data-latest --dir release; then
             cp release/segments.pmtiles release/segments.json _site/data/
             rm -rf _site/data/ids
             tar -xzf release/ids.tar.gz -C _site/data

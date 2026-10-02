@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import { distanceToLineMeters } from "../filters.js";
 import {
+  dataUrl,
   decodeTile,
   indexKey,
   lonLatToTile,
@@ -116,4 +117,12 @@ test("resolveIndexEntry reads live, moved and retired ids", () => {
   });
   assert.equal(resolveIndexEntry("flat-a", undefined), null);
   assert.equal(resolveIndexEntry("flat-a", [1.5]), null);
+});
+
+test("dataUrl resolves relative and absolute addresses", () => {
+  const base = "https://jsilobre.github.io/Flat-segments/data/";
+  assert.equal(dataUrl(base, "segments.pmtiles"), `${base}segments.pmtiles`);
+  assert.equal(dataUrl(base, "ids/3f.json"), `${base}ids/3f.json`);
+  const r2 = "https://pub-x.r2.dev/ids/20261002T120000Z";
+  assert.equal(dataUrl(base, `${r2}/3f.json`), `${r2}/3f.json`);
 });

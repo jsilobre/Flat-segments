@@ -20,6 +20,7 @@ import {
 } from "./filters.js";
 import { geocodeUrl, parseGeocodeResults } from "./geocode.js";
 import {
+  dataUrl,
   decodeTile,
   indexKey,
   normalizeProperties,
@@ -64,7 +65,7 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   metadata: null, // segments.json of the tileset
-  dataDir: null,
+  dataBase: null, // absolute URL of the folder of segments.json
   archive: null, // PMTiles
   tiles: new Map(), // "z/x/y" -> Promise of a decoded tile (or null)
   results: [],
@@ -460,7 +461,7 @@ async function focusSegment(id) {
   const status = (text) => ($("position-status").textContent = text);
   const notFound = () => status(`Segment introuvable : ${id}.`);
   const { index, index_prefix_length: prefix } = state.metadata.tiles;
-  const response = await fetch(`${state.dataDir}${index}/${indexKey(id, prefix)}.json`);
+  const response = await fetch(dataUrl(state.dataBase, `${index}/${indexKey(id, prefix)}.json`));
   const entry = resolveIndexEntry(id, response.ok ? (await response.json())[id] : undefined);
   if (!entry) return notFound();
   if (entry.status === "retired") {
@@ -706,8 +707,8 @@ async function fetchMetadata() {
 async function loadData() {
   const { dir, metadata } = await fetchMetadata();
   state.metadata = metadata;
-  state.dataDir = dir;
-  const url = new URL(`${dir}${metadata.tiles.url}`, location.href).href;
+  state.dataBase = new URL(dir, location.href).href;
+  const url = dataUrl(state.dataBase, metadata.tiles.url);
   state.archive = new PMTiles(url);
   protocol.add(state.archive);
   $("sample-banner").hidden = !metadata.sample;

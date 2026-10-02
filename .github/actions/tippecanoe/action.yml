@@ -1,0 +1,33 @@
+name: Install tippecanoe
+description: >
+  Builds tippecanoe and tile-join from source, in a pinned version (cached).
+  The Ubuntu package (2.49) mixes up attribute values on large sets: hash
+  collisions in its string pool, fixed in 2.55.0 (ADR 0009).
+inputs:
+  version:
+    description: tippecanoe release tag
+    default: "2.79.0"
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/tippecanoe
+        key: tippecanoe-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
+    - name: Build tippecanoe ${{ inputs.version }}
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        sudo apt-get update -q && sudo apt-get install -y -q libsqlite3-dev zlib1g-dev
+        git clone --quiet --depth 1 --branch "$VERSION" https://github.com/felt/tippecanoe.git "$RUNNER_TEMP/tippecanoe"
+        make -C "$RUNNER_TEMP/tippecanoe" -j "$(nproc)" tippecanoe tile-join
+        mkdir -p ~/.local/tippecanoe
+        cp "$RUNNER_TEMP/tippecanoe/tippecanoe" "$RUNNER_TEMP/tippecanoe/tile-join" ~/.local/tippecanoe/
+    - name: Put it on the PATH
+      shell: bash
+      run: |
+        echo "$HOME/.local/tippecanoe" >> "$GITHUB_PATH"
+        "$HOME/.local/tippecanoe/tippecanoe" --version

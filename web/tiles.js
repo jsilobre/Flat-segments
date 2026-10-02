@@ -206,13 +206,23 @@ export function tilesCoveringCircle([lon, lat], radiusM, z) {
 
 // --- segments -----------------------------------------------------------------
 
+/** A list property written as JSON, or [] if it cannot be read (a damaged tile). */
+function parseList(value) {
+  try {
+    const list = JSON.parse(value);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Segment properties as the page uses them: lists decoded, missing values null. */
 export function normalizeProperties(properties) {
   const props = { name: null, sinuosity: null, ...properties };
   for (const field of LIST_FIELDS) {
     const value = props[field];
-    if (typeof value === "string") props[field] = JSON.parse(value);
-    else if (value === undefined || value === null) props[field] = [];
+    if (typeof value === "string") props[field] = parseList(value);
+    else if (!Array.isArray(value)) props[field] = [];
   }
   return props;
 }

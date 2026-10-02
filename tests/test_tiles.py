@@ -116,3 +116,35 @@ def test_export_pmtiles_command_merges_departments(tmp_path: Path) -> None:
     assert metadata["counts"] == {"flat": 1, "climb": 1}
     assert metadata["params"] == {"x": 1}
     assert (out / "ids" / "00.json").exists()
+
+
+def test_tippecanoe_version_is_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert tiles.parse_version("tippecanoe v2.79.0\n") == (2, 79, 0)
+    assert tiles.parse_version("command not found") is None
+    monkeypatch.setattr(tiles, "tippecanoe_version", lambda: (2, 49, 0))
+    with pytest.raises(tiles.TippecanoeError, match=r"2\.49\.0 mixes up attribute values"):
+        tiles.check_tippecanoe()
+    assert not tiles.tippecanoe_available()
+    monkeypatch.setattr(tiles, "tippecanoe_version", lambda: None)
+    with pytest.raises(tiles.TippecanoeError, match="not found"):
+        tiles.check_tippecanoe()
+
+
+def test_tileset_mismatches_spot_mixed_up_values() -> None:
+    expected = {
+        "flat-a": {"id": "flat-a", "length_m": 271.8, "osm_way_ids": "[149966956]"},
+        "flat-b": {"id": "flat-b", "length_m": 302.2, "osm_way_ids": "[1161127635]", "name": "Rue"},
+        "flat-c": {"id": "flat-c", "length_m": 10.0, "osm_way_ids": "[1]"},
+    }
+    good = [
+        {"id": "flat-a", "length_m": 271.8000000000001, "osm_way_ids": "[149966956]", "name": None},
+        {"id": "flat-a", "length_m": 271.8, "osm_way_ids": "[149966956]", "name": float("nan")},
+        {"id": "flat-b", "length_m": 302.2, "osm_way_ids": "[1161127635]", "name": "Rue"},
+        {"id": "flat-c", "length_m": 10, "osm_way_ids": "[1]", "name": None},
+    ]
+    assert tiles.tileset_mismatches(expected, good) == []
+    mixed = [dict(good[0], osm_way_ids="climb-d006353a8869"), good[2]]
+    problems = tiles.tileset_mismatches(expected, [*mixed, {"id": "climb-x"}])
+    assert problems[0] == "flat-a: osm_way_ids = 'climb-d006353a8869', expected '[149966956]'"
+    assert problems[1] == "unknown feature id 'climb-x'"
+    assert problems[-1] == "1 segments missing"

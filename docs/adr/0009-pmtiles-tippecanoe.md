@@ -41,8 +41,19 @@ lignes.
 ## Décision
 
 - Les PMTiles sont produits par **tippecanoe**, appelé par le pipeline comme
-  outil externe. Il est installé par `apt install tippecanoe` (Ubuntu, runners
-  GitHub) ou `brew install tippecanoe`.
+  outil externe. Il faut la version **2.55 ou plus**.
+  - Le paquet Ubuntu (2.49) mélange les attributs de certains objets sur les
+    gros jeux : collisions de hachage dans sa table de chaînes, corrigées en
+    2.55. Constaté sur l'ex-Midi-Pyrénées (amendement du 02/10/2026, voir
+    [étape 2.4](../phase-2/2.4-production.md)).
+  - L'export refuse une version plus ancienne.
+  - La CI et la production compilent tippecanoe 2.79.0 depuis les sources
+    (action `.github/actions/tippecanoe`, mise en cache). En local :
+    `brew install tippecanoe`, ou compilation depuis les sources.
+- **Contrôle** : après l'écriture, l'export relit la couche `segments` au
+  zoom 12 avec GDAL et la compare aux segments donnés (identifiants et toutes
+  les propriétés). Il échoue au moindre écart, avant toute publication. Cela
+  prend environ 30 s pour 350 000 segments.
 - Couche `segments` :
   - zooms **12 à 14 sans perte** (`--no-feature-limit --no-tile-size-limit`) ;
   - au-delà de 14, MapLibre agrandit les tuiles de z14.

@@ -106,7 +106,9 @@ uv run flat-segments export-pmtiles # publication pour le site → web/data/segm
 ```
 
 `export-pmtiles` demande [tippecanoe](https://github.com/felt/tippecanoe)
-(`apt install tippecanoe` ou `brew install tippecanoe`). Il accepte plusieurs
+en version 2.55 ou plus (`brew install tippecanoe`, ou compilation depuis les
+sources : le paquet Ubuntu, en 2.49, mélange des attributs, voir
+[ADR 0009](docs/adr/0009-pmtiles-tippecanoe.md)). Il accepte plusieurs
 fichiers de segments, par exemple ceux de plusieurs départements :
 `export-pmtiles data/departments/*/segments.parquet`.
 

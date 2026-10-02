@@ -24,6 +24,8 @@ as JSON strings, and null properties (``name``…) are left out.
 from __future__ import annotations
 
 import json
+import math
+import re
 import shutil
 import subprocess
 import tempfile
@@ -56,10 +58,18 @@ OVERVIEW_FIELDS: Final = ("id", "kind", "length_m")
 INDEX_PREFIX_LENGTH: Final = 2
 #: Entries per index file above which the prefix grows by one character.
 INDEX_FILE_ENTRIES: Final = 2000
+#: Oldest usable tippecanoe. Before 2.55.0, hash collisions in its string pool
+#: give some features the attribute values of others: 5 to 18 segments out of
+#: 350,000 on the ex-Midi-Pyrénées, with tippecanoe 2.49 (Ubuntu package).
+MIN_TIPPECANOE: Final = (2, 55, 0)
 
 
 class TippecanoeError(RuntimeError):
-    """tippecanoe is missing or failed."""
+    """tippecanoe is missing, too old or failed."""
+
+
+class TilesetCheckError(TippecanoeError):
+    """The written tiles do not hold the segments as they were given."""
 
 
 @dataclass(frozen=True)
@@ -71,9 +81,45 @@ class TilesetFiles:
     index_dir: Path
 
 
+def parse_version(text: str) -> tuple[int, int, int] | None:
+    """``(major, minor, patch)`` in the output of ``tippecanoe --version``."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    return (int(match[1]), int(match[2]), int(match[3])) if match else None
+
+
+def tippecanoe_version() -> tuple[int, int, int] | None:
+    """Version of the ``tippecanoe`` on the PATH, or None if absent."""
+    path = shutil.which("tippecanoe")
+    if path is None:
+        return None
+    result = subprocess.run([path, "--version"], capture_output=True, text=True, check=False)
+    return parse_version(result.stdout + result.stderr)
+
+
+def check_tippecanoe() -> None:
+    """Make sure that tippecanoe and tile-join are installed, in a usable version.
+
+    Raises:
+        TippecanoeError: If they are missing or older than ``MIN_TIPPECANOE``.
+    """
+    version = tippecanoe_version()
+    if version is None or shutil.which("tile-join") is None:
+        raise TippecanoeError("tippecanoe and tile-join not found: install tippecanoe (ADR 0009)")
+    if version < MIN_TIPPECANOE:
+        found, needed = (".".join(map(str, v)) for v in (version, MIN_TIPPECANOE))
+        raise TippecanoeError(
+            f"tippecanoe {found} mixes up attribute values on large sets: "
+            f"install {needed} or later (ADR 0009)"
+        )
+
+
 def tippecanoe_available() -> bool:
-    """Whether ``tippecanoe`` and ``tile-join`` are on the PATH."""
-    return shutil.which("tippecanoe") is not None and shutil.which("tile-join") is not None
+    """Whether ``tippecanoe`` and ``tile-join`` are installed in a usable version."""
+    try:
+        check_tippecanoe()
+    except TippecanoeError:
+        return False
+    return True
 
 
 def tile_properties(segment: Segment) -> dict[str, Any]:
@@ -135,8 +181,9 @@ def write_pmtiles(
     """Write the two-layer PMTiles archive with tippecanoe and tile-join.
 
     Raises:
-        TippecanoeError: If the tools are missing or fail.
+        TippecanoeError: If the tools are missing, too old or fail.
     """
+    check_tippecanoe()
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="flat-segments-tiles-") as tmp:
@@ -183,6 +230,75 @@ def write_pmtiles(
             ]
         )
     return path
+
+
+def _same(expected: Any, found: Any) -> bool:
+    """Whether a property read back from the tiles is the one written."""
+    if expected is None:
+        return found is None or (isinstance(found, float) and math.isnan(found))
+    if (
+        isinstance(expected, bool | int | float)
+        and not isinstance(found, str)
+        and found is not None
+    ):
+        return math.isclose(float(expected), float(found), rel_tol=1e-9, abs_tol=1e-9)
+    return bool(expected == found)
+
+
+def tileset_mismatches(
+    expected: Mapping[str, Mapping[str, Any]], rows: Sequence[Mapping[str, Any]], limit: int = 5
+) -> list[str]:
+    """Differences between the properties written and the features read back.
+
+    Args:
+        expected: Properties written, by segment id (``tile_properties``).
+        rows: Features read back from the tiles (several per segment cut by
+            tile borders), as property mappings.
+        limit: Number of differences to describe at most.
+
+    Returns:
+        Descriptions of the differences (empty if none), plus the number of
+        segments missing from the tiles.
+    """
+    problems: list[str] = []
+    seen: set[str] = set()
+    fields = sorted({name for props in expected.values() for name in props})
+    for row in rows:
+        segment_id = str(row.get("id"))
+        if segment_id not in expected:
+            problems.append(f"unknown feature id {segment_id!r}")
+            continue
+        seen.add(segment_id)
+        props = expected[segment_id]
+        for name in fields:
+            if not _same(props.get(name), row.get(name)):
+                problems.append(
+                    f"{segment_id}: {name} = {row.get(name)!r}, expected {props.get(name)!r}"
+                )
+                break
+    missing = len(expected) - len(seen)
+    described = problems[:limit] + (
+        [f"... {len(problems) - limit} more"] if len(problems) > limit else []
+    )
+    return described + ([f"{missing} segments missing"] if missing else [])
+
+
+def verify_pmtiles(path: Path, segments: Sequence[Segment]) -> None:
+    """Read the detail layer back at its first zoom and compare it with the segments.
+
+    Raises:
+        TilesetCheckError: If a segment is missing or a property differs.
+    """
+    import pyogrio  # type: ignore[import-untyped]
+
+    frame = pyogrio.read_dataframe(
+        path, layer=DETAIL_LAYER, read_geometry=False, ZOOM_LEVEL=DETAIL_ZOOMS[0]
+    )
+    rows = frame.drop(columns=[c for c in ("mvt_id",) if c in frame.columns]).to_dict("records")
+    expected = {s.id: tile_properties(s) for s in segments}
+    problems = tileset_mismatches(expected, rows)
+    if problems:
+        raise TilesetCheckError(f"{path} does not hold the segments: " + "; ".join(problems))
 
 
 def write_id_index(
@@ -265,8 +381,11 @@ def write_tileset(
 ) -> TilesetFiles:
     """Write ``segments.pmtiles``, ``segments.json`` and ``ids/`` in ``directory``.
 
+    The tiles are read back and checked before the other files are written.
+
     Raises:
-        TippecanoeError: If the tools are missing or fail.
+        TippecanoeError: If the tools are missing, too old or fail, or if the
+            tiles do not hold the segments (``TilesetCheckError``).
     """
     to_wgs84 = make_projector(WORK_CRS, WEB_CRS)
     prefix = index_prefix_length(len(segments) + len(redirects or {}))
@@ -283,6 +402,7 @@ def write_tileset(
         directory / "segments.pmtiles", directory / "segments.json", directory / "ids"
     )
     write_pmtiles(segments, files.pmtiles, metadata["attribution"], to_wgs84)
+    verify_pmtiles(files.pmtiles, segments)
     write_id_index(segments, files.index_dir, to_wgs84, redirects=redirects, prefix_length=prefix)
     files.metadata.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"

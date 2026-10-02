@@ -68,6 +68,12 @@ test("segmentsFromTiles merges the pieces of a segment and decodes its lists", (
   assert.deepEqual(segment.properties.quality_flags, []);
 });
 
+test("normalizeProperties survives a list that is not JSON", () => {
+  const p = normalizeProperties({ id: "flat-a", osm_way_ids: "climb-d006353a8869", highways: "3" });
+  assert.deepEqual(p.osm_way_ids, []);
+  assert.deepEqual(p.highways, []);
+});
+
 test("normalizeProperties keeps present values", () => {
   const p = normalizeProperties({ name: "Voie verte", sinuosity: 1.1, quality_flags: '["gap_filled"]' });
   assert.equal(p.name, "Voie verte");

@@ -76,7 +76,7 @@ Chaque étape est une commande de la CLI Typer `flat-segments` :
 | `elevation` | strokes + MNT (GeoTIFF/VRT en Lambert-93) | `data/interim/profiles.parquet` | `elevation.py` |
 | `detect` | strokes + profils | `data/processed/segments.parquet` | `profile.py`, `detect.py` |
 | `export` | segments | `data/processed/segments.geojson` (inspection) | `export.py` |
-| `export-pmtiles` | un ou plusieurs fichiers de segments | `web/data/segments.pmtiles`, `segments.json`, `ids/` | `tiles.py` (tippecanoe) |
+| `export-pmtiles` | un ou plusieurs fichiers de segments ; avec `--previous`, le jeu déjà publié | `web/data/segments.pmtiles`, `segments.json`, `ids/` (identifiants de la version publiée conservés, [ADR 0012](adr/0012-identifiants-stables.md)) | `tiles.py` (tippecanoe), `lineage.py` |
 | `pipeline` | extrait découpé + MNT | les quatre sorties ci-dessus | `pipeline.py` |
 
 Le découpage en quatre étapes permet de régler les seuils de détection
@@ -89,6 +89,9 @@ Le découpage en quatre étapes permet de régler les seuils de détection
 | `download-departments` | WFS de la Géoplateforme (Admin Express) | `data/raw/departements.geojson` | `departments.py` |
 | `department CODE` | extrait OSM régional + contours | `data/departments/CODE/` : `strokes.parquet`, `profiles.parquet`, `segments.parquet`, `state.json` | `batch.py`, `departments.py` |
 | `departments CODE…` | idem, plusieurs départements | idem, plus un récapitulatif | `batch.py` |
+| `cut-osm PBF [CODE…]` | extrait OSM national + contours | `data/osm/CODE.osm.pbf` : un extrait par département (contour élargi, voies entières), par lots | `osm_extracts.py` (osmium) |
+| `department-codes [CODE…]` | contours | liste JSON des codes (toute la métropole par défaut), pour le workflow | `departments.py` |
+| `department-summary STATE…` | `state.json` de départements traités | tableau récapitulatif (Markdown) | `batch.py` |
 
 Un département est traité sur son contour élargi de 2 km. On garde les
 segments dont le milieu est dans le département, si bien que chaque segment
@@ -130,7 +133,9 @@ Les modules :
 | `pipeline.py` | Les quatre étapes sous forme de fonctions, partagées par les commandes | E/S |
 | `departments.py` | Contours des départements (Admin Express), règle du milieu pour rattacher un segment | pur + E/S |
 | `batch.py` | Production par département : étapes avec reprise, état, récapitulatif | E/S |
+| `osm_extracts.py` | Découpe d'un extrait OSM national par département (osmium) | E/S |
 | `tiles.py` | Publication en tuiles vectorielles (tippecanoe, tile-join), métadonnées, index des identifiants | E/S |
+| `lineage.py` | Rapprochement avec la version publiée : identifiants conservés, redirigés ou retirés | pur + E/S |
 | `calibration.py` | Rapport, balayage de paramètres, graphique de profil, fiche de validation | pur + E/S |
 | `cli.py` | CLI Typer, câblage des étapes | E/S |
 
@@ -206,13 +211,18 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
   position et `?kind=climb` affiche les côtes.
   - La position du segment est lue dans `data/ids/`, puis on lit les tuiles
     autour d'elle.
+  - Un identifiant d'une version précédente ouvre le segment qui le remplace,
+    ou montre l'endroit où était un segment disparu, et la page le signale
+    ([ADR 0012](adr/0012-identifiants-stables.md)).
   - Le segment d'un lien reste affiché même s'il sort des filtres (une côte à
     2,97 % avec un minimum de 3 %, par exemple), jusqu'à la fermeture de sa
     fiche.
   - L'URL suit la sélection, ce qui sert à partager un segment et à la fiche
     de validation terrain.
 - **Publication** : le workflow `.github/workflows/pages.yml` déploie `web/`
-  (sans les tests) sur GitHub Pages à chaque modification sur `main`.
+  (sans les tests) sur GitHub Pages à chaque modification sur `main`, avec
+  les données de la release `data-latest` quand elle existe
+  ([ADR 0011](adr/0011-production-github-actions.md)).
 
 ```mermaid
 sequenceDiagram
@@ -323,8 +333,8 @@ recalés à l'échelle régionale.
 | **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Pas de 2 m adopté (amendement de l'ADR 0007) |
 | **2.1 Pipeline par département** *(faite, [rapport](phase-2/2.1-departement.md))* | Commandes `department` et `departments` : contour Admin Express élargi de 2 km, MNT limité aux dalles utiles, rattachement au département qui contient le milieu, reprise. Haute-Garonne : 31 min 31 s, 45 341 segments, résultats identiques à ceux du pilote | Volume des PMTiles régionaux par rapport à la limite de 100 Mo de GitHub (étape 2.3) |
 | **2.2 PMTiles et front sur tuiles** *(faite, [rapport](phase-2/2.2-tuiles.md))* | `export-pmtiles` (détail z12–14, vue d'ensemble z8–11, index des identifiants) ; front sur tuiles (décodeur MVT, liste à partir des tuiles z12, liens directs par index) ; Haute-Garonne publiée | Service par GitHub Pages vérifié (les navigateurs ne demandent pas de gzip sur les requêtes partielles) |
-| **2.3 Ex-Midi-Pyrénées** | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (quelques dizaines à ~150 Mo estimés) ; couverture LiDAR HD des Pyrénées |
-| **2.4 Production automatisée** | Workflow GitHub Actions, une tâche par département, puis assemblage ; régénération périodique | Limites d'Actions (6 h et ~14 Go de disque par tâche) et limites d'usage de l'IGN |
+| **2.3 Ex-Midi-Pyrénées** *(fusionnée dans 2.4)* | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages : premier lancement du workflow de 2.4. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (60 à 110 Mo attendus) ; couverture LiDAR HD vérifiée sur les 8 départements |
+| **2.4 Production automatisée** *(en cours)* | Workflow GitHub Actions ([ADR 0011](adr/0011-production-github-actions.md)) : découpe OSM par département, une tâche par département, assemblage, publication dans la release `data-latest` déployée par Pages. Identifiants conservés d'une version à l'autre ([ADR 0012](adr/0012-identifiants-stables.md)). Régénération à la main | Tenue du service de l'IGN en parallèle ; durée, disque et taille sur l'ex-Midi-Pyrénées |
 | **2.5 France métropolitaine** | 96 départements, PMTiles (1 à 2 Go estimés) sur un stockage d'objets (type Cloudflare R2) | Changement d'hébergement, CORS et requêtes partielles |
 
 ## 6. Qualité et outillage
@@ -333,11 +343,14 @@ recalés à l'échelle régionale.
   constante, bosse, bruit, zigzag, pont…) ; `node --test` pour le filtrage JS.
 - **Lint et types** : ruff (lint + format), mypy en mode strict.
 - **pre-commit** : ruff, mypy, hygiène des fichiers, refus des fichiers de plus
-  de 1 Mo (aucune donnée volumineuse dans Git). Seule exception : le jeu publié
-  `web/data/segments.geojson`, plafonné à environ 10 Mo par
-  l'[ADR 0005](adr/0005-front-statique-maplibre.md).
-- **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13), tests JS ;
-  déploiement GitHub Pages du front depuis `main`.
+  de 1 Mo (aucune donnée volumineuse dans Git). Seule exception, provisoire :
+  le jeu publié `web/data/segments.pmtiles`, qui sort de Git avec la
+  production automatisée ([ADR 0011](adr/0011-production-github-actions.md)).
+- **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13, avec
+  tippecanoe et osmium), tests JS ; déploiement GitHub Pages du front depuis
+  `main`.
+- **Production** : workflow `produce.yml`, lancé à la main
+  ([ADR 0011](adr/0011-production-github-actions.md)).
 - **Réseau** : les téléchargements passent par une fonction d'ouverture d'URL
   injectable, ce qui permet de tout tester hors ligne (faux serveur WMS).
 

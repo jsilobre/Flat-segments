@@ -355,6 +355,12 @@ que de quelques mètres. Ce n'est pas une garantie : une extrémité proche
 d'une ligne de la grille peut basculer. En cas de collision dans un même
 export, on ajoute un suffixe `-2`, `-3`… par score décroissant.
 
+À la publication, l'empreinte n'est qu'un identifiant provisoire. Les
+segments sont rapprochés de la version déjà publiée, et ceux qui couvrent le
+même terrain en reprennent l'identifiant. Les identifiants disparus sont
+redirigés vers le segment qui les remplace, ou retirés
+([ADR 0012](adr/0012-identifiants-stables.md)).
+
 ## 13. Récapitulatif des paramètres
 
 | Paramètre | Défaut | Rôle |

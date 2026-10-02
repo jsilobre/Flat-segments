@@ -8,6 +8,7 @@ import {
   indexKey,
   lonLatToTile,
   normalizeProperties,
+  resolveIndexEntry,
   segmentsFromTiles,
   tilePointToLonLat,
   tilesCoveringCircle,
@@ -93,4 +94,20 @@ test("indexKey uses the first characters of the id hash", () => {
   assert.equal(indexKey("flat-3fa2b1c9d0e4"), "3f");
   assert.equal(indexKey("climb-3fa2b1c9d0e4-2"), "3f");
   assert.equal(indexKey("nonsense"), "");
+});
+
+test("resolveIndexEntry reads live, moved and retired ids", () => {
+  assert.deepEqual(resolveIndexEntry("flat-a", [1.5, 43.5]), { status: "live", id: "flat-a", position: [1.5, 43.5] });
+  assert.deepEqual(resolveIndexEntry("flat-a", [1.5, 43.5, "flat-b"]), {
+    status: "moved",
+    id: "flat-b",
+    position: [1.5, 43.5],
+  });
+  assert.deepEqual(resolveIndexEntry("flat-a", [1.5, 43.5, null]), {
+    status: "retired",
+    id: null,
+    position: [1.5, 43.5],
+  });
+  assert.equal(resolveIndexEntry("flat-a", undefined), null);
+  assert.equal(resolveIndexEntry("flat-a", [1.5]), null);
 });

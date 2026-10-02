@@ -248,6 +248,19 @@ export function segmentsFromTiles(tiles) {
   return [...byId.values()];
 }
 
+/**
+ * Read an entry of the id index (see tiles.py and lineage.py).
+ * @returns {{status: "live" | "moved" | "retired", id: string | null, position: [number, number]} | null}
+ *   `id` is the segment to open (null when it is gone); null for no entry.
+ */
+export function resolveIndexEntry(id, entry) {
+  if (!Array.isArray(entry) || entry.length < 2) return null;
+  const position = [Number(entry[0]), Number(entry[1])];
+  if (entry.length < 3) return { status: "live", id, position };
+  const target = entry[2];
+  return target ? { status: "moved", id: target, position } : { status: "retired", id: null, position };
+}
+
 /** Name of the index file giving the position of a segment id (see tiles.py). */
 export function indexKey(id, prefixLength = 2) {
   return String(id).split("-")[1]?.slice(0, prefixLength) ?? "";

@@ -9,6 +9,8 @@ name: Production
 # 3. assemble: export-pmtiles with the ids of the published version kept
 #    (ADR 0012), then publication. A failed département blocks it: rerun the
 #    failed jobs, the others keep their results.
+# With reuse_run, only the assembly runs, on the départements of an earlier
+# run (its artifacts are kept 7 days): to republish after a fix in the export.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +24,9 @@ on:
       max_parallel:
         description: "Départements computed at once (each sends 4 requests at a time to the IGN)"
         default: "4"
+      reuse_run:
+        description: "Only assemble, from the départements of this earlier run id (departments is then ignored)"
+        default: ""
 
 permissions:
   contents: write # releases
@@ -41,6 +46,7 @@ env:
 
 jobs:
   prepare:
+    if: inputs.reuse_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
     outputs:
@@ -141,6 +147,10 @@ jobs:
 
   assemble:
     needs: department
+    # The départements of this run, or those of reuse_run (department skipped).
+    if: >-
+      !cancelled() && (needs.department.result == 'success'
+      || (inputs.reuse_run != '' && needs.department.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -149,14 +159,23 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - name: Install tippecanoe
-        run: sudo apt-get update -q && sudo apt-get install -y -q tippecanoe
+      - uses: ./.github/actions/tippecanoe
       - name: Install dependencies
         run: uv sync --locked
-      - uses: actions/download-artifact@v4
+      - name: Départements of this run
+        if: inputs.reuse_run == ''
+        uses: actions/download-artifact@v4
         with:
           pattern: segments-*
           path: segments
+      - name: Départements of run ${{ inputs.reuse_run }}
+        if: inputs.reuse_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: segments-*
+          path: segments
+          run-id: ${{ inputs.reuse_run }}
+          github-token: ${{ github.token }}
       - name: Published version (to keep its ids)
         run: |
           mkdir previous

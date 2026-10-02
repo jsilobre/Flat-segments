@@ -26,8 +26,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - name: Install tippecanoe (PMTiles export, ADR 0009) and osmium (OSM cut)
-        run: sudo apt-get update -q && sudo apt-get install -y -q tippecanoe osmium-tool
+      - uses: ./.github/actions/tippecanoe
+      - name: Install osmium (OSM cut)
+        run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
       - name: Install dependencies
         run: uv sync --locked
       - name: Lint

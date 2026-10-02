@@ -7,8 +7,14 @@ only its own extract. The cut uses the same area as the département pipeline
 whole, as ``osm.read_ways`` expects. Running the pipeline on the cut extract
 or on a regional one therefore gives the same ways.
 
-osmium keeps one node id set per extract in memory: the départements are cut
-in batches, each batch being one pass over the national file.
+osmium keeps node id sets per extract, sized by the largest node id (about
+3.7 GB per extract with the OSM ids of 2026, over 14 billion): eight extracts
+at once exhaust a 16 GB runner. The national file is therefore first
+renumbered (:func:`renumber_nodes`): node ids then run from 1, and a whole
+batch of 8 départements takes less than 2 GB. Only node ids change: they are
+internal to the network (shared nodes), while the published way ids stay the
+OSM ones. The départements are then cut in batches, each batch being one pass
+over the national file.
 """
 
 from __future__ import annotations
@@ -86,6 +92,30 @@ def osmium_config(
             }
         )
     return {"directory": str(out_dir), "extracts": extracts}
+
+
+def renumber_nodes(pbf: Path, out: Path) -> Path:
+    """Copy ``pbf`` with its nodes numbered from 1 (ways and relations unchanged).
+
+    The new ids follow the order of the old ones (the file is sorted by id),
+    so that the network built from it is the same.
+
+    Raises:
+        OsmiumError: If osmium is missing or fails.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run_osmium(
+        [
+            "osmium",
+            "renumber",
+            "--object-type=node",
+            "--overwrite",
+            "--no-progress",
+            f"--output={out}",
+            str(pbf),
+        ]
+    )
+    return out
 
 
 def cut_extracts(

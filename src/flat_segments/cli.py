@@ -436,6 +436,22 @@ def department_summary(
     typer.echo(summary_table(table), nl=False)
 
 
+@app.command("renumber-osm")
+def renumber_osm(
+    pbf: Annotated[Path, typer.Argument(help="OSM extract.", exists=True, dir_okay=False)],
+    out: Annotated[Path, typer.Argument(help="Output extract.", dir_okay=False)],
+) -> None:
+    """Number the nodes from 1, before cut-osm on a large file (needs osmium-tool)."""
+    from flat_segments.osm_extracts import OsmiumError, renumber_nodes
+
+    try:
+        renumber_nodes(pbf, out)
+    except OsmiumError as error:
+        typer.echo(f"Renumbering failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"{pbf} -> {out} ({out.stat().st_size / 1e6:.1f} MB)")
+
+
 @app.command("cut-osm")
 def cut_osm(
     pbf: Annotated[Path, typer.Argument(help="National OSM extract.", exists=True, dir_okay=False)],

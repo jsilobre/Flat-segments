@@ -26,6 +26,14 @@ publiée (module `lineage.py`, option `export-pmtiles --previous`).
   `segments.pmtiles` au zoom 14. Les géométries y sont à moins d'un mètre
   des originales : sur la Haute-Garonne, la longueur relue diffère de moins
   de 0,4 % pour 98 % des segments, et de 1,1 % au plus. On relit aussi l'index `ids/`.
+- **Département par département** (amendement du 02/10/2026,
+  [étape 2.5](../phase-2/2.5-france.md)) : pour tenir en mémoire à l'échelle
+  de la France, chaque département est rapproché des segments précédents lus
+  autour de lui (emprise élargie de 5 km). Un segment précédent ne peut être
+  gardé qu'une fois, quel que soit le département. La liste des segments
+  précédents et la position d'un identifiant retiré viennent de l'index
+  publié. Sur l'ex-Midi-Pyrénées, le résultat est identique à celui du
+  rapprochement global.
 - **Conservation** : un nouveau segment garde l'identifiant d'un ancien quand
   - ils sont du même type ;
   - chacun est couvert à **80 %** au moins par l'autre, à **10 m** près.
@@ -66,7 +74,8 @@ publiée (module `lineage.py`, option `export-pmtiles --previous`).
   l'empreinte, et seul le jeu publié porte l'identifiant définitif.
 - **Coût** : la relecture et le rapprochement prennent environ 30 s par
   département de la taille de la Haute-Garonne. Pour la France, c'est
-  quelques minutes à l'assemblage.
+  quelques minutes à l'assemblage. La mémoire est celle du plus gros
+  département.
 - **Un jeu publié remplace le précédent en entier** : un segment absent de la
   nouvelle publication est retiré ou redirigé. Publier moins de départements
   qu'avant retire donc les identifiants des autres.

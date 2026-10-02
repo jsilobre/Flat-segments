@@ -120,7 +120,9 @@ def read_previous(directory: Path, layer: str = "segments") -> PreviousVersion |
     pmtiles = directory / "segments.pmtiles"
     if not pmtiles.exists():
         return None
-    frame = gpd.read_file(pmtiles, layer=layer, columns=["id"], engine="pyogrio")
+    frame = gpd.read_file(
+        pmtiles, layer=layer, columns=["id"], engine="pyogrio", ZOOM_LEVEL=READ_ZOOM
+    )
     frame = frame[frame["id"].map(is_segment_id)]
     segments: tuple[PreviousSegment, ...] = ()
     if len(frame):
@@ -132,6 +134,8 @@ def read_previous(directory: Path, layer: str = "segments") -> PreviousVersion |
     return PreviousVersion(segments, read_redirects(directory / "ids"))
 
 
+#: Zoom at which the previous segments are read back (the first of the layer).
+READ_ZOOM: Final = 12
 #: Margin around a chunk when reading the previous segments, in metres: a
 #: previous segment crossing the chunk extent is read whole.
 PREVIOUS_MARGIN_M: Final = 5000.0
@@ -158,8 +162,16 @@ class PublishedTileset:
         bbox = to_mercator.transform_bounds(
             min_x - margin_m, min_y - margin_m, max_x + margin_m, max_y + margin_m
         )
+        # Zoom 12, the first zoom of the layer: GDAL loses pieces of some long
+        # segments at zoom 14 (2,081 m read for a climb of 4,509 m, whole in
+        # the tiles), and the coarser geometry (about 2 m) is well within BUFFER_M.
         frame = gpd.read_file(
-            self.pmtiles, layer=self.layer, columns=["id"], bbox=bbox, engine="pyogrio"
+            self.pmtiles,
+            layer=self.layer,
+            columns=["id"],
+            bbox=bbox,
+            engine="pyogrio",
+            ZOOM_LEVEL=READ_ZOOM,
         )
         frame = frame[frame["id"].map(is_segment_id)]
         if not len(frame):

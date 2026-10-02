@@ -191,15 +191,27 @@ def export_pmtiles(
         Path, typer.Option(help="Published folder (segments.pmtiles, segments.json, ids/).")
     ] = PATHS.web_data,
     sample: SampleOpt = False,
+    previous: Annotated[
+        Path | None,
+        typer.Option(
+            help="Previously published folder: keep its ids (may be --out-dir itself).",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
 ) -> None:
     """Publish segments as vector tiles for the web page (needs tippecanoe)."""
     from flat_segments.tiles import TippecanoeError
 
     try:
-        count, files = steps.run_publish(segments or [PATHS.segments], out_dir, sample=sample)
+        count, files, lineage = steps.run_publish(
+            segments or [PATHS.segments], out_dir, sample=sample, previous=previous
+        )
     except (ValueError, TippecanoeError) as error:
         typer.echo(f"Export failed: {error}", err=True)
         raise typer.Exit(1) from error
+    if lineage is not None:
+        typer.echo(f"ids: {lineage.summary}")
     typer.echo(f"{count} segments -> {files.pmtiles}, {files.metadata}, {files.index_dir}/")
 
 

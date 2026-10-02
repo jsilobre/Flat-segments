@@ -10,9 +10,12 @@ The web page reads three things next to each other (``web/data/``):
     ``kind`` and ``length_m``, thinned out by tippecanoe where too dense.
 * ``segments.json``: what the GeoJSON ``metadata`` member used to hold
   (attribution, date, parameters), plus the bounds and counts of the set.
-* ``ids/XX.json``: where each segment is, for links holding only an ``id``.
-  The ids are spread over 256 small files by the first two hexadecimal
-  characters of their hash part.
+* ``ids/XX.json``: where each segment is, for links holding only an ``id``:
+  ``[lon, lat]``, or ``[lon, lat, target]`` for an id of an earlier version
+  (``target``: the id to open instead, ``null`` if the segment is gone; see
+  ``lineage.py``). The ids are spread over small files by the first
+  hexadecimal characters of their hash part: 2 (256 files), or more for a
+  large set (``index_prefix_length``).
 
 Vector tiles have no list nor null values: lists (``highways``…) are written
 as JSON strings, and null properties (``name``…) are left out.
@@ -41,6 +44,7 @@ from flat_segments.export import (
     segment_properties,
 )
 from flat_segments.geometry import Projector, make_projector
+from flat_segments.lineage import Redirect
 from flat_segments.params import WEB_CRS, WORK_CRS
 
 DETAIL_LAYER: Final = "segments"
@@ -48,8 +52,10 @@ OVERVIEW_LAYER: Final = "overview"
 DETAIL_ZOOMS: Final = (12, 14)
 OVERVIEW_ZOOMS: Final = (8, 11)
 OVERVIEW_FIELDS: Final = ("id", "kind", "length_m")
-#: Number of hexadecimal characters of the id hash naming its index file.
+#: Number of hexadecimal characters of the id hash naming its index file (at least).
 INDEX_PREFIX_LENGTH: Final = 2
+#: Entries per index file above which the prefix grows by one character.
+INDEX_FILE_ENTRIES: Final = 2000
 
 
 class TippecanoeError(RuntimeError):
@@ -80,9 +86,17 @@ def tile_properties(segment: Segment) -> dict[str, Any]:
     return props
 
 
-def index_key(segment_id: str) -> str:
+def index_key(segment_id: str, prefix_length: int = INDEX_PREFIX_LENGTH) -> str:
     """Name (without extension) of the index file holding ``segment_id``."""
-    return segment_id.split("-")[1][:INDEX_PREFIX_LENGTH]
+    return segment_id.split("-")[1][:prefix_length]
+
+
+def index_prefix_length(n_entries: int) -> int:
+    """Prefix length keeping index files under ``INDEX_FILE_ENTRIES`` entries on average."""
+    length = INDEX_PREFIX_LENGTH
+    while n_entries > INDEX_FILE_ENTRIES * 16**length:
+        length += 1
+    return length
 
 
 def _write_features(
@@ -172,17 +186,26 @@ def write_pmtiles(
 
 
 def write_id_index(
-    segments: Sequence[Segment], directory: Path, to_wgs84: Projector | None = None
+    segments: Sequence[Segment],
+    directory: Path,
+    to_wgs84: Projector | None = None,
+    *,
+    redirects: Mapping[str, Redirect] | None = None,
+    prefix_length: int = INDEX_PREFIX_LENGTH,
 ) -> int:
     """Write ``directory/XX.json``: id -> ``[lon, lat]`` of the segment midpoint.
 
-    Older files are removed first. Returns the number of files written.
+    Redirected ids get ``[lon, lat, target]``. Older files are removed first.
+    Returns the number of files written.
     """
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
-    shards: dict[str, dict[str, list[float]]] = defaultdict(dict)
+    shards: dict[str, dict[str, list[Any]]] = defaultdict(dict)
     for segment in segments:
         mid = to_wgs84(segment.coords[len(segment.coords) // 2][None, :])[0]
-        shards[index_key(segment.id)][segment.id] = [round(float(v), 5) for v in mid]
+        shards[index_key(segment.id, prefix_length)][segment.id] = [round(float(v), 5) for v in mid]
+    for segment_id, redirect in (redirects or {}).items():
+        lon, lat = redirect.position
+        shards[index_key(segment_id, prefix_length)][segment_id] = [lon, lat, redirect.target]
     if directory.exists():
         shutil.rmtree(directory)
     directory.mkdir(parents=True)
@@ -200,6 +223,7 @@ def tileset_metadata(
     attribution: Sequence[str] | None = None,
     params: Mapping[str, Any] | None = None,
     to_wgs84: Projector | None = None,
+    index_prefix: int = INDEX_PREFIX_LENGTH,
 ) -> dict[str, Any]:
     """Content of ``segments.json`` (see docs/data-model.md)."""
     to_wgs84 = to_wgs84 or make_projector(WORK_CRS, WEB_CRS)
@@ -223,7 +247,7 @@ def tileset_metadata(
             "overview_layer": OVERVIEW_LAYER,
             "overview_minzoom": OVERVIEW_ZOOMS[0],
             "index": "ids",
-            "index_prefix_length": INDEX_PREFIX_LENGTH,
+            "index_prefix_length": index_prefix,
         },
         **({"params": dict(params)} if params is not None else {}),
     }
@@ -237,6 +261,7 @@ def write_tileset(
     generated_at: datetime | None = None,
     attribution: Sequence[str] | None = None,
     params: Mapping[str, Any] | None = None,
+    redirects: Mapping[str, Redirect] | None = None,
 ) -> TilesetFiles:
     """Write ``segments.pmtiles``, ``segments.json`` and ``ids/`` in ``directory``.
 
@@ -244,6 +269,7 @@ def write_tileset(
         TippecanoeError: If the tools are missing or fail.
     """
     to_wgs84 = make_projector(WORK_CRS, WEB_CRS)
+    prefix = index_prefix_length(len(segments) + len(redirects or {}))
     metadata = tileset_metadata(
         segments,
         sample=sample,
@@ -251,12 +277,13 @@ def write_tileset(
         attribution=attribution,
         params=params,
         to_wgs84=to_wgs84,
+        index_prefix=prefix,
     )
     files = TilesetFiles(
         directory / "segments.pmtiles", directory / "segments.json", directory / "ids"
     )
     write_pmtiles(segments, files.pmtiles, metadata["attribution"], to_wgs84)
-    write_id_index(segments, files.index_dir, to_wgs84)
+    write_id_index(segments, files.index_dir, to_wgs84, redirects=redirects, prefix_length=prefix)
     files.metadata.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
     )

@@ -19,6 +19,7 @@ from flat_segments.detect import Segment, detect_all
 from flat_segments.params import PipelineParams
 
 if TYPE_CHECKING:
+    from flat_segments.lineage import Lineage
     from flat_segments.tiles import TilesetFiles
 
 
@@ -126,15 +127,22 @@ def run_export(segments: Path, out: Path, *, sample: bool = False) -> int:
 
 
 def run_publish(
-    segments_files: Sequence[Path], out_dir: Path, *, sample: bool = False
-) -> tuple[int, TilesetFiles]:
+    segments_files: Sequence[Path],
+    out_dir: Path,
+    *,
+    sample: bool = False,
+    previous: Path | None = None,
+) -> tuple[int, TilesetFiles, Lineage | None]:
     """Publish one or more segments files (pilot, départements) as a tileset.
 
     The parameters recorded next to each file (``segments.params.toml``) must
-    be identical: a published set says how it was produced.
+    be identical: a published set says how it was produced. With
+    ``previous`` (a published folder, possibly ``out_dir`` itself), the ids
+    are matched with the published ones so that links keep working
+    (``lineage.py``).
 
     Returns:
-        ``(number of segments, files written)``.
+        ``(number of segments, files written, id matching or None)``.
 
     Raises:
         ValueError: If the files were produced with different parameters or
@@ -142,6 +150,7 @@ def run_publish(
         TippecanoeError: If tippecanoe is missing or fails.
     """
     from flat_segments.export import read_segments
+    from flat_segments.lineage import match, read_previous
     from flat_segments.tiles import write_tileset
 
     sidecars = {
@@ -156,8 +165,18 @@ def run_publish(
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate segment ids across the files")
     params = tomllib.loads(sidecars.pop()) if sidecars else None
-    files = write_tileset(segments, out_dir, sample=sample, params=params)
-    return len(segments), files
+    lineage = None
+    if previous is not None:
+        lineage = match(segments, read_previous(previous))
+        segments = list(lineage.segments)
+    files = write_tileset(
+        segments,
+        out_dir,
+        sample=sample,
+        params=params,
+        redirects=lineage.redirects if lineage else None,
+    )
+    return len(segments), files, lineage
 
 
 def run_all(

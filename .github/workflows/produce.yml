@@ -1,13 +1,16 @@
 name: Production
 
 # Phase 2.4 (ADR 0011): computes départements in parallel, then publishes the
-# tileset in the release "data-latest", which the Pages workflow deploys.
+# tileset on Cloudflare R2 (ADR 0013), or in the release "data-latest" when
+# the repository has no R2 settings. The Pages workflow then deploys the site.
+# 0. storage: checks the R2 bucket (write, public partial reads, CORS);
 # 1. prepare: France OSM extract (Geofabrik, else the openstreetmap.fr
 #    mirror), nodes renumbered (osmium needs memory in proportion to the
 #    largest node id), cut per département into the release "osm-extracts";
 # 2. department: one job per département (OSM extract, DEM, segments);
 # 3. assemble: export-pmtiles with the ids of the published version kept
-#    (ADR 0012), then publication. A failed département blocks it: rerun the
+#    (ADR 0012), then publication. On R2, each version has its own file names
+#    (a browser never mixes two versions) and the two latest are kept. A failed département blocks it: rerun the
 #    failed jobs, the others keep their results.
 # With reuse_run, only the assembly runs, on the départements of an earlier
 # run (its artifacts are kept 7 days): to republish after a fix in the export.
@@ -45,7 +48,46 @@ env:
   GH_TOKEN: ${{ github.token }}
 
 jobs:
+  storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      r2: ${{ steps.check.outputs.r2 }}
+    env:
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      PAGES_ORIGIN: https://${{ github.repository_owner }}.github.io
+    steps:
+      - name: Check the R2 bucket (write, public partial read with CORS, delete)
+        id: check
+        run: |
+          if [ -z "$R2_BUCKET" ]; then
+            echo "No R2 settings: publication in the release $DATA_RELEASE."
+            echo "r2=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          R2_PUBLIC_URL=${R2_PUBLIC_URL%/}
+          key="checks/run-$GITHUB_RUN_ID.txt"
+          echo "flat-segments storage check, run $GITHUB_RUN_ID" > check.txt
+          aws s3 cp check.txt "s3://$R2_BUCKET/$key" --only-show-errors
+          headers=$(curl -sS -D - -o /dev/null -H "Origin: $PAGES_ORIGIN" -H "Range: bytes=0-12" \
+            "$R2_PUBLIC_URL/$key" | tr -d '\r')
+          aws s3 rm "s3://$R2_BUCKET/$key" --only-show-errors
+          echo "$headers"
+          grep -q '^HTTP/[0-9.]* 206' <<< "$headers" \
+            || { echo "::error::$R2_PUBLIC_URL does not serve partial reads (206)"; exit 1; }
+          grep -qiE "^access-control-allow-origin: (\*|$PAGES_ORIGIN)" <<< "$headers" \
+            || { echo "::error::CORS: $R2_PUBLIC_URL does not allow $PAGES_ORIGIN"; exit 1; }
+          echo "r2=true" >> "$GITHUB_OUTPUT"
+
   prepare:
+    needs: storage
     if: inputs.reuse_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -146,13 +188,24 @@ jobs:
             ${{ env.WORK }}/departments/${{ matrix.code }}/state.json
 
   assemble:
-    needs: department
+    needs: [storage, department]
     # The départements of this run, or those of reuse_run (department skipped).
     if: >-
-      !cancelled() && (needs.department.result == 'success'
+      !cancelled() && needs.storage.result == 'success'
+      && (needs.department.result == 'success'
       || (inputs.reuse_run != '' && needs.department.result == 'skipped'))
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
+    env:
+      R2: ${{ needs.storage.outputs.r2 }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
@@ -179,7 +232,14 @@ jobs:
       - name: Published version (to keep its ids)
         run: |
           mkdir previous
-          if gh release download "$DATA_RELEASE" --dir previous; then
+          # The object key is the path of a public address.
+          key() { local url=${1#*://}; echo "${url#*/}"; }
+          if [ "$R2" = true ] && aws s3 cp "s3://$R2_BUCKET/segments.json" previous/ --only-show-errors; then
+            aws s3 cp "s3://$R2_BUCKET/$(key "$(jq -r .tiles.url previous/segments.json)")" \
+              previous/segments.pmtiles --only-show-errors
+            aws s3 sync "s3://$R2_BUCKET/$(key "$(jq -r .tiles.index previous/segments.json)")" \
+              previous/ids --only-show-errors
+          elif gh release download "$DATA_RELEASE" --dir previous; then
             tar -xzf previous/ids.tar.gz -C previous
           else
             echo "No published version: every id is new."
@@ -187,8 +247,19 @@ jobs:
           ls previous
       - name: Tileset
         run: |
-          uv run flat-segments export-pmtiles segments/*/segments.parquet \
-            --previous previous --out-dir out | tee export.log
+          set -o pipefail
+          R2_PUBLIC_URL=${R2_PUBLIC_URL%/}
+          version=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          addresses=()
+          if [ "$R2" = true ]; then
+            addresses=(--tiles-url "$R2_PUBLIC_URL/tiles/segments-$version.pmtiles"
+                       --index-url "$R2_PUBLIC_URL/ids/$version")
+          fi
+          timer=()
+          [ -x /usr/bin/time ] && timer=(/usr/bin/time -f "export: %e s, max memory %M KB")
+          "${timer[@]}" uv run flat-segments export-pmtiles segments/*/segments.parquet \
+            --previous previous --out-dir out "${addresses[@]}" 2>&1 | tee export.log
           tar -czf ids.tar.gz -C out ids
       - name: Summary
         run: |
@@ -202,8 +273,28 @@ jobs:
             du -h out/segments.pmtiles out/segments.json ids.tar.gz
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish on R2 (two latest versions kept), then the site
+        if: inputs.publish && env.R2 == 'true'
+        run: |
+          immutable="public, max-age=31536000, immutable"
+          aws s3 cp out/segments.pmtiles "s3://$R2_BUCKET/tiles/segments-$VERSION.pmtiles" \
+            --cache-control "$immutable" --content-type application/octet-stream --only-show-errors
+          aws s3 sync out/ids "s3://$R2_BUCKET/ids/$VERSION" \
+            --cache-control "$immutable" --content-type application/json --only-show-errors
+          aws s3 cp out/segments.json "s3://$R2_BUCKET/segments.json" \
+            --cache-control "no-cache" --content-type application/json --only-show-errors
+          mapfile -t versions < <(aws s3 ls "s3://$R2_BUCKET/tiles/" \
+            | sed -n 's/.* segments-\(.*\)\.pmtiles$/\1/p' | sort)
+          if (( ${#versions[@]} > 2 )); then
+            for old in "${versions[@]:0:${#versions[@]}-2}"; do
+              aws s3 rm "s3://$R2_BUCKET/tiles/segments-$old.pmtiles" --only-show-errors
+              aws s3 rm "s3://$R2_BUCKET/ids/$old/" --recursive --only-show-errors
+            done
+          fi
+          echo "Published version $VERSION on R2"
+          gh workflow run pages.yml --ref main
       - name: Publish (release data-latest, then the site)
-        if: inputs.publish
+        if: inputs.publish && env.R2 != 'true'
         run: |
           gh release view "$DATA_RELEASE" > /dev/null 2>&1 \
             || gh release create "$DATA_RELEASE" --prerelease --title "Données publiées" \

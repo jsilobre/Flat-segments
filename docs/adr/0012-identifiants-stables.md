@@ -23,7 +23,9 @@ Avant de publier, on rapproche les nouveaux segments de ceux de la version
 publiée (module `lineage.py`, option `export-pmtiles --previous`).
 
 - **Version de référence** : ce qui a été publié, relu dans
-  `segments.pmtiles` au zoom 14. Les géométries y sont à moins d'un mètre
+  `segments.pmtiles` au zoom 14, puis au zoom 12 depuis le 02/10/2026. GDAL
+  perdait au zoom 14 des morceaux de certains longs segments, pourtant
+  entiers dans les tuiles ([étape 2.5](../phase-2/2.5-france.md)). Les géométries y sont à moins d'un mètre
   des originales : sur la Haute-Garonne, la longueur relue diffère de moins
   de 0,4 % pour 98 % des segments, et de 1,1 % au plus. On relit aussi l'index `ids/`.
 - **Département par département** (amendement du 02/10/2026,

@@ -156,3 +156,26 @@ def test_republishing_keeps_ids_and_writes_redirects(tmp_path: Path) -> None:
     assert entries["flat-aaaaaaaaaaaa"][2] == "flat-222222222222"
     assert len(entries["flat-bbbbbbbbbbbb"]) == 2
     assert lineage.read_redirects(files.index_dir) == dict(result.redirects)
+
+
+def test_damaged_ids_of_a_published_index_are_left_out(tmp_path: Path) -> None:
+    assert lineage.is_segment_id("flat-0123456789ab")
+    assert lineage.is_segment_id("climb-0123456789ab-2")
+    assert not lineage.is_segment_id("[603595499,603595496]")
+    assert not lineage.is_segment_id("flat-0123456789ab ")
+    assert not lineage.is_segment_id(None)
+    (tmp_path / "01.json").write_text(
+        json.dumps(
+            {
+                "flat-0123456789ab": [1.5, 43.5, "flat-0123456789ac"],
+                "climb-0123456789ab": [1.5, 43.5, None],
+                "flat-0123456789ad": [1.5, 43.5],
+                "[603595499]": [1.5, 43.5, None],
+                "flat-0123456789ae": [1.5, 43.5, "[149966956]"],
+            }
+        )
+    )
+    assert lineage.read_redirects(tmp_path) == {
+        "flat-0123456789ab": Redirect("flat-0123456789ac", (1.5, 43.5)),
+        "climb-0123456789ab": Redirect(None, (1.5, 43.5)),
+    }

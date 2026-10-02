@@ -132,3 +132,21 @@ def test_department_summary_command(tmp_path: Path) -> None:
     assert rows[0].startswith("| 31 D31 |")
     assert "| 30.0 | ok |" in rows[0]
     assert rows[1].startswith("| 81 D81 |")
+
+
+@needs_osmium
+def test_renumbering_keeps_the_ways(tmp_path: Path, outlines: Path) -> None:
+    pbf = tmp_path / "france.osm"
+    pbf.write_text(osm_xml())
+    renumbered = ox.renumber_nodes(pbf, tmp_path / "france-renumbered.osm.pbf")
+    before = {way.id: way for way in read_ways(pbf)}
+    after = {way.id: way for way in read_ways(renumbered)}
+    assert set(before) == set(after) == set(WAYS)
+    for way_id, way in before.items():
+        assert (after[way_id].coords == way.coords).all()
+    files = ox.cut_extracts(renumbered, dep.load_departments(outlines, ["31"]), tmp_path / "osm")
+    assert {way.id for way in read_ways(files[0])} == {1, 2, 4}
+    result = CliRunner().invoke(
+        cli.app, ["renumber-osm", str(pbf), str(tmp_path / "again.osm.pbf")]
+    )
+    assert result.exit_code == 0, result.output

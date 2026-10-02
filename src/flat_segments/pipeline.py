@@ -132,6 +132,8 @@ def run_publish(
     *,
     sample: bool = False,
     previous: Path | None = None,
+    tiles_url: str = "segments.pmtiles",
+    index_url: str = "ids",
 ) -> tuple[int, TilesetFiles, Lineage | None]:
     """Publish one or more segments files (pilot, départements) as a tileset.
 
@@ -139,7 +141,8 @@ def run_publish(
     be identical: a published set says how it was produced. With
     ``previous`` (a published folder, possibly ``out_dir`` itself), the ids
     are matched with the published ones so that links keep working
-    (``lineage.py``).
+    (``lineage.py``). ``tiles_url`` and ``index_url`` say where the page will
+    find the tiles and the index (``segments.json``).
 
     Returns:
         ``(number of segments, files written, id matching or None)``.
@@ -175,6 +178,8 @@ def run_publish(
         sample=sample,
         params=params,
         redirects=lineage.redirects if lineage else None,
+        tiles_url=tiles_url,
+        index_url=index_url,
     )
     return len(segments), files, lineage
 

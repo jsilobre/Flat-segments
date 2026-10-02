@@ -199,13 +199,25 @@ def export_pmtiles(
             file_okay=False,
         ),
     ] = None,
+    tiles_url: Annotated[
+        str,
+        typer.Option(help="Address of the tiles in segments.json (relative, or absolute: R2)."),
+    ] = "segments.pmtiles",
+    index_url: Annotated[
+        str, typer.Option(help="Address of the id index folder in segments.json.")
+    ] = "ids",
 ) -> None:
     """Publish segments as vector tiles for the web page (needs tippecanoe)."""
     from flat_segments.tiles import TippecanoeError
 
     try:
         count, files, lineage = steps.run_publish(
-            segments or [PATHS.segments], out_dir, sample=sample, previous=previous
+            segments or [PATHS.segments],
+            out_dir,
+            sample=sample,
+            previous=previous,
+            tiles_url=tiles_url,
+            index_url=index_url,
         )
     except (ValueError, TippecanoeError) as error:
         typer.echo(f"Export failed: {error}", err=True)

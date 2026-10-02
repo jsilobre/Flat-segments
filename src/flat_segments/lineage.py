@@ -24,6 +24,7 @@ reference. The tile geometries are within a metre of the original ones.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -44,6 +45,13 @@ BUFFER_M: Final = 10.0
 MATCH_MIN: Final = 0.8
 #: Share of a vanished segment covered by a new one to redirect its id there.
 ALIAS_MIN: Final = 0.3
+#: A segment id: kind, 12 hexadecimal characters, optional ``-N`` suffix.
+SEGMENT_ID: Final = re.compile(r"(flat|climb)-[0-9a-f]{12}(-[0-9]+)?")
+
+
+def is_segment_id(value: object) -> bool:
+    """Whether ``value`` is a segment id (a damaged tile may hold anything)."""
+    return isinstance(value, str) and SEGMENT_ID.fullmatch(value) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,31 +109,41 @@ class Lineage:
 def read_previous(directory: Path, layer: str = "segments") -> PreviousVersion | None:
     """Read a published tileset (``segments.pmtiles``, ``ids/``), or None if absent.
 
-    The pieces of a segment cut by tile borders are merged back.
+    The pieces of a segment cut by tile borders are merged back. Features
+    whose id is not a segment id are left out: tippecanoe before 2.55 could
+    give a feature the value of another attribute as id (ADR 0009). The kind
+    is taken from the id.
     """
     import geopandas as gpd
 
     pmtiles = directory / "segments.pmtiles"
     if not pmtiles.exists():
         return None
-    frame = gpd.read_file(pmtiles, layer=layer, columns=["id", "kind"], engine="pyogrio")
+    frame = gpd.read_file(pmtiles, layer=layer, columns=["id"], engine="pyogrio")
+    frame = frame[frame["id"].map(is_segment_id)]
     segments: tuple[PreviousSegment, ...] = ()
     if len(frame):
-        merged = frame.to_crs(WORK_CRS).dissolve(by="id", aggfunc="first")
+        merged = frame.to_crs(WORK_CRS).dissolve(by="id")
         segments = tuple(
-            PreviousSegment(str(i), str(kind), shapely.line_merge(geometry))
-            for i, kind, geometry in zip(merged.index, merged["kind"], merged.geometry, strict=True)
+            PreviousSegment(str(i), str(i).split("-")[0], shapely.line_merge(geometry))
+            for i, geometry in zip(merged.index, merged.geometry, strict=True)
         )
     return PreviousVersion(segments, read_redirects(directory / "ids"))
 
 
 def read_redirects(index_dir: Path) -> dict[str, Redirect]:
-    """Redirects of a published id index (entries ``[lon, lat, target]``)."""
+    """Redirects of a published id index (entries ``[lon, lat, target]``).
+
+    Entries that are not segment ids, or whose target is not one, are left out.
+    """
     redirects: dict[str, Redirect] = {}
     for path in sorted(index_dir.glob("*.json")):
         for segment_id, entry in json.loads(path.read_text(encoding="utf-8")).items():
-            if len(entry) == 3:
-                redirects[segment_id] = Redirect(entry[2], (float(entry[0]), float(entry[1])))
+            if len(entry) != 3 or not is_segment_id(segment_id):
+                continue
+            target = entry[2]
+            if target is None or is_segment_id(target):
+                redirects[segment_id] = Redirect(target, (float(entry[0]), float(entry[1])))
     return redirects
 
 

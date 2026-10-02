@@ -183,7 +183,8 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
     [ADR 0010](adr/0010-geocodage-ign.md), fonctions pures dans
     `geocode.js`).
 - **Données en tuiles vectorielles** ([ADR 0009](adr/0009-pmtiles-tippecanoe.md),
-  [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles`, lu par le
+  [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles` (déployé
+  depuis la release `data-latest`), lu par le
   protocole `pmtiles://` (requêtes partielles, sans serveur).
   - Couche `segments` (zooms 12 à 14), avec tous les attributs ; couche
     `overview` (zooms 8 à 11), allégée, pour la vue d'ensemble.
@@ -334,8 +335,8 @@ recalés à l'échelle régionale.
 | **2.0 Mesures sur le pilote** *(faite, [rapport](phase-2/2.0-mesures.md))* | MNT au pas de 2 m : 98 à 99 % des km retrouvés, les 20 segments de la fiche terrain inchangés, téléchargement 3,5 fois plus rapide en dalles de 4 km. Outil PMTiles : tippecanoe ([ADR 0009](adr/0009-pmtiles-tippecanoe.md)) | Pas de 2 m adopté (amendement de l'ADR 0007) |
 | **2.1 Pipeline par département** *(faite, [rapport](phase-2/2.1-departement.md))* | Commandes `department` et `departments` : contour Admin Express élargi de 2 km, MNT limité aux dalles utiles, rattachement au département qui contient le milieu, reprise. Haute-Garonne : 31 min 31 s, 45 341 segments, résultats identiques à ceux du pilote | Volume des PMTiles régionaux par rapport à la limite de 100 Mo de GitHub (étape 2.3) |
 | **2.2 PMTiles et front sur tuiles** *(faite, [rapport](phase-2/2.2-tuiles.md))* | `export-pmtiles` (détail z12–14, vue d'ensemble z8–11, index des identifiants) ; front sur tuiles (décodeur MVT, liste à partir des tuiles z12, liens directs par index) ; Haute-Garonne publiée | Service par GitHub Pages vérifié (les navigateurs ne demandent pas de gzip sur les requêtes partielles) |
-| **2.3 Ex-Midi-Pyrénées** *(fusionnée dans 2.4)* | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages : premier lancement du workflow de 2.4. Campagne de validation 2 en zones rurales et en montagne | Taille réelle (60 à 110 Mo attendus) ; couverture LiDAR HD vérifiée sur les 8 départements |
-| **2.4 Production automatisée** *(en cours)* | Workflow GitHub Actions ([ADR 0011](adr/0011-production-github-actions.md)) : découpe OSM par département, une tâche par département, assemblage, publication dans la release `data-latest` déployée par Pages. Identifiants conservés d'une version à l'autre ([ADR 0012](adr/0012-identifiants-stables.md)). Régénération à la main | Tenue du service de l'IGN en parallèle ; durée, disque et taille sur l'ex-Midi-Pyrénées |
+| **2.3 Ex-Midi-Pyrénées** *(fusionnée dans 2.4, en ligne)* | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages : 48 444 plats et 301 601 côtes. Reste la campagne de validation 2 en zones rurales et en montagne | 155 Mo de PMTiles ; couverture LiDAR HD complète sur les 8 départements |
+| **2.4 Production automatisée** *(faite, [rapport](phase-2/2.4-production.md))* | Workflow GitHub Actions ([ADR 0011](adr/0011-production-github-actions.md)) : renumérotation et découpe OSM, une tâche par département, assemblage, publication dans la release `data-latest` déployée par Pages, données hors de Git. Identifiants conservés d'une version à l'autre ([ADR 0012](adr/0012-identifiants-stables.md)). Ex-Midi-Pyrénées en 57 min | Débit du service de l'IGN variable (1,3 à 5,3 s par dalle) ; régénération à la main |
 | **2.5 France métropolitaine** | 96 départements, PMTiles (1 à 2 Go estimés) sur un stockage d'objets (type Cloudflare R2) | Changement d'hébergement, CORS et requêtes partielles |
 
 ## 6. Qualité et outillage
@@ -344,9 +345,9 @@ recalés à l'échelle régionale.
   constante, bosse, bruit, zigzag, pont…) ; `node --test` pour le filtrage JS.
 - **Lint et types** : ruff (lint + format), mypy en mode strict.
 - **pre-commit** : ruff, mypy, hygiène des fichiers, refus des fichiers de plus
-  de 1 Mo (aucune donnée volumineuse dans Git). Seule exception, provisoire :
-  le jeu publié `web/data/segments.pmtiles`, qui sort de Git avec la
-  production automatisée ([ADR 0011](adr/0011-production-github-actions.md)).
+  de 1 Mo (aucune donnée volumineuse dans Git). Le jeu publié n'est plus dans
+  le dépôt : il est dans la release `data-latest`
+  ([ADR 0011](adr/0011-production-github-actions.md)).
 - **CI GitHub Actions** : lint, types, tests Python (3.12 et 3.13, avec
   tippecanoe et osmium), tests JS ; déploiement GitHub Pages du front depuis
   `main`.

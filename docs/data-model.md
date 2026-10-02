@@ -79,7 +79,9 @@ Champs **internes**, présents seulement dans le GeoParquet :
 
 Depuis l'[étape 2.2](phase-2/2.2-tuiles.md), le site lit trois éléments dans
 `web/data/`, écrits par `flat-segments export-pmtiles`
-([ADR 0009](adr/0009-pmtiles-tippecanoe.md)).
+([ADR 0009](adr/0009-pmtiles-tippecanoe.md)). En production, ils sont
+publiés dans la release `data-latest`, l'index étant archivé dans
+`ids.tar.gz` ([ADR 0011](adr/0011-production-github-actions.md)).
 
 **`segments.pmtiles`** : tuiles vectorielles (MVT, compressées en gzip,
 projection Web Mercator) en deux couches.

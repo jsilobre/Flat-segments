@@ -39,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Without the release, the files committed in web/data/ stay (ADR 0011).
+          # Without the release, the page falls back on the sample set (ADR 0011).
           if gh release download data-latest --dir release; then
             cp release/segments.pmtiles release/segments.json _site/data/
             rm -rf _site/data/ids

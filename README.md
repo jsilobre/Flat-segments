@@ -65,8 +65,10 @@ l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
   **Haute-Garonne**, soit 14 532 plats et 30 809 côtes
   ([2.2](docs/phase-2/2.2-tuiles.md)).
 - **Production automatisée** sur GitHub Actions, et identifiants conservés
-  d'une version publiée à l'autre (2.4, en cours) : premier lancement sur
-  l'ex-Midi-Pyrénées.
+  d'une version publiée à l'autre ([2.4](docs/phase-2/2.4-production.md)).
+- **Ex-Midi-Pyrénées en ligne** : 8 départements, 48 444 plats et 301 601
+  côtes, calculés en 57 min.
+- Prochaine étape : la France métropolitaine (2.5), sur un stockage d'objets.
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
@@ -172,6 +174,14 @@ fait pas `python -m http.server`. La page lit les tuiles
 `web/data/segments.pmtiles` ; si `web/data/segments.json` manque, elle prend
 le jeu d'exemple `web/data/sample/` (données fictives, signalées par un
 bandeau).
+
+Le jeu publié n'est pas dans le dépôt
+([ADR 0011](docs/adr/0011-production-github-actions.md)). Pour l'avoir en
+local :
+
+```bash
+gh release download data-latest --dir web/data && tar -xzf web/data/ids.tar.gz -C web/data
+```
 
 Liens directs : `?id=<segment>` ouvre un segment, `?lat=…&lon=…` fixe la
 position et `?kind=climb` affiche les côtes. Le workflow *Pages* publie `web/` à

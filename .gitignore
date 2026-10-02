@@ -20,3 +20,9 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Published set, downloaded from the release data-latest (ADR 0011)
+/web/data/segments.pmtiles
+/web/data/segments.json
+/web/data/ids/
+/web/data/ids.tar.gz

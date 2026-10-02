@@ -91,6 +91,9 @@ tâches peuvent tourner en parallèle.
 - **Mise en service** : un workflow lancé à la main doit être sur `main` pour
   être lancé. On le fusionne d'abord, puis on l'essaie sur un petit
   département sans publier.
+- **Premier lancement** ([rapport 2.4](../phase-2/2.4-production.md)) :
+  l'ex-Midi-Pyrénées en 57 min, avec 4 départements à la fois et 155 Mo de
+  PMTiles.
 
 ## Alternatives considérées
 

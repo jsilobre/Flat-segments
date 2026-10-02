@@ -163,8 +163,7 @@ jobs:
           if gh release download "$DATA_RELEASE" --dir previous; then
             tar -xzf previous/ids.tar.gz -C previous
           else
-            # First publication from this workflow: the files still in the repository.
-            cp -r web/data/. previous/
+            echo "No published version: every id is new."
           fi
           ls previous
       - name: Tileset

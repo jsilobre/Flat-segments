@@ -19,7 +19,14 @@ import {
   sortResults,
 } from "./filters.js";
 import { geocodeUrl, parseGeocodeResults } from "./geocode.js";
-import { decodeTile, indexKey, normalizeProperties, segmentsFromTiles, tilesCoveringCircle } from "./tiles.js";
+import {
+  decodeTile,
+  indexKey,
+  normalizeProperties,
+  resolveIndexEntry,
+  segmentsFromTiles,
+  tilesCoveringCircle,
+} from "./tiles.js";
 
 // Published tileset, or the fictitious sample when there is none.
 const DATA_DIRS = ["data/", "data/sample/"];
@@ -445,21 +452,34 @@ function selectSegment(id, lngLat = null, feature = null) {
   updateUrl();
 }
 
-/** Show a segment from a link, even if the current filters hide it. */
+/**
+ * Show a segment from a link, even if the current filters hide it. An id of
+ * an earlier version opens the segment that replaced it (lineage.py).
+ */
 async function focusSegment(id) {
-  const notFound = () => ($("position-status").textContent = `Segment introuvable : ${id}.`);
+  const status = (text) => ($("position-status").textContent = text);
+  const notFound = () => status(`Segment introuvable : ${id}.`);
   const { index, index_prefix_length: prefix } = state.metadata.tiles;
   const response = await fetch(`${state.dataDir}${index}/${indexKey(id, prefix)}.json`);
-  const where = response.ok ? (await response.json())[id] : undefined;
-  if (!where) return notFound();
-  const { features } = await segmentsAround(where, LINK_RADIUS_M);
-  const feature = features.find((f) => f.id === id);
+  const entry = resolveIndexEntry(id, response.ok ? (await response.json())[id] : undefined);
+  if (!entry) return notFound();
+  if (entry.status === "retired") {
+    status(`Le segment ${id} n'existe plus dans les données à jour : la carte montre où il était.`);
+    map.jumpTo({ center: entry.position, zoom: 15 });
+    updateUrl(); // drop the dead id from the address
+    return undefined;
+  }
+  const { features } = await segmentsAround(entry.position, LINK_RADIUS_M);
+  const feature = features.find((f) => f.id === entry.id);
   if (!feature) return notFound();
+  if (entry.status === "moved") {
+    status(`Le segment ${id} a changé lors d'une mise à jour des données : voici ce qui le remplace.`);
+  }
   $(`kind-${feature.properties.kind}`).checked = true;
   readControls();
-  state.pinnedId = id;
+  state.pinnedId = entry.id;
   updateMapFilters();
-  whenLayersReady(() => selectSegment(id, null, feature));
+  whenLayersReady(() => selectSegment(entry.id, null, feature));
   if (state.position) refreshResults(); // otherwise moveend (fitBounds) does it
   return undefined;
 }

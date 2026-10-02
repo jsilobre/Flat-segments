@@ -17,6 +17,8 @@ ADR NNNN ». Les corrections mineures (précision, lien) se font sur place.
 | [0008](0008-couverture-nationale-precalcul-statique.md) | Couverture nationale par précalcul statique (PMTiles), API facultative | Acceptée |
 | [0009](0009-pmtiles-tippecanoe.md) | Tuiles vectorielles PMTiles produites avec tippecanoe | Acceptée |
 | [0010](0010-geocodage-ign.md) | Recherche d'adresse avec le géocodeur de l'IGN | Acceptée |
+| [0011](0011-production-github-actions.md) | Production sur GitHub Actions, données publiées hors de Git | Acceptée |
+| [0012](0012-identifiants-stables.md) | Identifiants conservés d'une version publiée à l'autre | Acceptée |
 
 ## Gabarit
 

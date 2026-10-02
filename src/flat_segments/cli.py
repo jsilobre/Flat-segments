@@ -191,15 +191,27 @@ def export_pmtiles(
         Path, typer.Option(help="Published folder (segments.pmtiles, segments.json, ids/).")
     ] = PATHS.web_data,
     sample: SampleOpt = False,
+    previous: Annotated[
+        Path | None,
+        typer.Option(
+            help="Previously published folder: keep its ids (may be --out-dir itself).",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
 ) -> None:
     """Publish segments as vector tiles for the web page (needs tippecanoe)."""
     from flat_segments.tiles import TippecanoeError
 
     try:
-        count, files = steps.run_publish(segments or [PATHS.segments], out_dir, sample=sample)
+        count, files, lineage = steps.run_publish(
+            segments or [PATHS.segments], out_dir, sample=sample, previous=previous
+        )
     except (ValueError, TippecanoeError) as error:
         typer.echo(f"Export failed: {error}", err=True)
         raise typer.Exit(1) from error
+    if lineage is not None:
+        typer.echo(f"ids: {lineage.summary}")
     typer.echo(f"{count} segments -> {files.pmtiles}, {files.metadata}, {files.index_dir}/")
 
 
@@ -387,6 +399,77 @@ def departments(
     typer.echo(summary_table(states), nl=False)
     if any(isinstance(state, str) for state in states.values()):
         raise typer.Exit(1)
+
+
+@app.command("department-codes")
+def department_codes(
+    codes: Annotated[
+        list[str] | None, typer.Argument(help="INSEE codes (default: all of metropolitan France).")
+    ] = None,
+    departments_file: DepartmentsFileOpt = DEPARTMENTS_FILE,
+) -> None:
+    """Print département codes as a JSON list (checked against the outlines file)."""
+    import json
+
+    from flat_segments import departments as dep
+
+    known = dep.department_codes(departments_file, overseas=True)
+    unknown = [c for c in codes or [] if c not in known]
+    if unknown:
+        raise typer.BadParameter(f"unknown départements: {' '.join(unknown)}")
+    typer.echo(json.dumps(codes or dep.department_codes(departments_file)))
+
+
+@app.command("department-summary")
+def department_summary(
+    states: Annotated[
+        list[Path], typer.Argument(help="state.json files of processed départements.", exists=True)
+    ],
+) -> None:
+    """Print the Markdown summary table of processed départements."""
+    import json
+
+    from flat_segments.batch import summary_table
+
+    loaded = [json.loads(path.read_text(encoding="utf-8")) for path in states]
+    table = {state["code"]: state for state in sorted(loaded, key=lambda state: state["code"])}
+    typer.echo(summary_table(table), nl=False)
+
+
+@app.command("cut-osm")
+def cut_osm(
+    pbf: Annotated[Path, typer.Argument(help="National OSM extract.", exists=True, dir_okay=False)],
+    codes: Annotated[
+        list[str] | None, typer.Argument(help="INSEE codes (default: all of metropolitan France).")
+    ] = None,
+    departments_file: DepartmentsFileOpt = DEPARTMENTS_FILE,
+    out_dir: Annotated[Path, typer.Option(help="Folder of the extracts (CODE.osm.pbf).")] = Path(
+        "data/osm"
+    ),
+    batch_size: Annotated[
+        int, typer.Option(help="Départements cut per pass over the national file.", min=1)
+    ] = 12,
+) -> None:
+    """Cut one OSM extract per département (needs osmium-tool)."""
+    from flat_segments import departments as dep
+    from flat_segments.osm_extracts import OsmiumError, cut_extracts
+
+    try:
+        selected = dep.load_departments(
+            departments_file, codes or dep.department_codes(departments_file)
+        )
+    except KeyError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    def report(files: list[Path]) -> None:
+        for path in files:
+            typer.echo(f"{path} ({path.stat().st_size / 1e6:.1f} MB)")
+
+    try:
+        cut_extracts(pbf, selected, out_dir, batch_size=batch_size, on_batch=report)
+    except OsmiumError as error:
+        typer.echo(f"Cut failed: {error}", err=True)
+        raise typer.Exit(1) from error
 
 
 def _detection_params(

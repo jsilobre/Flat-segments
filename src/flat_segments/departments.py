@@ -117,6 +117,34 @@ def load_department(path: Path, code: str) -> Department:
     raise KeyError(f"unknown département {code!r} in {path}")
 
 
+def department_codes(path: Path, *, overseas: bool = False) -> list[str]:
+    """INSEE codes of a file written by :func:`download_departments`, sorted.
+
+    Overseas départements (codes 971 to 976) are left out unless asked for.
+    """
+    collection = json.loads(path.read_text(encoding="utf-8"))
+    codes = sorted(f["properties"]["code_insee"] for f in collection["features"])
+    return [c for c in codes if overseas or not c.startswith("97")]
+
+
+def load_departments(path: Path, codes: Sequence[str]) -> list[Department]:
+    """Read several départements, in the order of ``codes``.
+
+    Raises:
+        KeyError: If a code is unknown.
+    """
+    collection = json.loads(path.read_text(encoding="utf-8"))
+    by_code = {f["properties"]["code_insee"]: f for f in collection["features"]}
+    departments = []
+    for code in codes:
+        if code not in by_code:
+            raise KeyError(f"unknown département {code!r} in {path}")
+        feature = by_code[code]
+        name = feature["properties"].get("nom_officiel", code)
+        departments.append(Department(code, name, shape(feature["geometry"])))
+    return departments
+
+
 def owned_segments(segments: Sequence[Segment], outline_l93: BaseGeometry) -> list[Segment]:
     """Segments whose midpoint lies in the outline (Lambert-93).
 

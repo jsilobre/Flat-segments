@@ -35,6 +35,17 @@ jobs:
           mkdir -p _site
           cp web/index.html web/app.js web/filters.js web/geocode.js web/tiles.js web/style.css _site/
           cp -r web/data _site/data
+      - name: Published data (release data-latest, from the Production workflow)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Without the release, the files committed in web/data/ stay (ADR 0011).
+          if gh release download data-latest --dir release; then
+            cp release/segments.pmtiles release/segments.json _site/data/
+            rm -rf _site/data/ids
+            tar -xzf release/ids.tar.gz -C _site/data
+          fi
+          du -sh _site/data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -64,7 +64,9 @@ l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
 - **Site sur tuiles vectorielles** (PMTiles) : publication de la
   **Haute-Garonne**, soit 14 532 plats et 30 809 côtes
   ([2.2](docs/phase-2/2.2-tuiles.md)).
-- Prochaine étape : l'ex-Midi-Pyrénées en ligne (2.3).
+- **Production automatisée** sur GitHub Actions, et identifiants conservés
+  d'une version publiée à l'autre (2.4, en cours) : premier lancement sur
+  l'ex-Midi-Pyrénées.
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).
@@ -114,6 +116,20 @@ uv run flat-segments download-departments                      # contours (Admin
 uv run flat-segments department 31 --pbf data/raw/midi_pyrenees.osm.pbf
 uv run flat-segments departments 09 31 82 --pbf data/raw/midi_pyrenees.osm.pbf
 ```
+
+En production, le workflow `produce.yml` (lancé à la main sur GitHub) fait
+tout cela en parallèle, un département par tâche, puis publie le jeu
+([ADR 0011](docs/adr/0011-production-github-actions.md)). En local, ses
+étapes sont :
+
+```bash
+uv run flat-segments cut-osm data/raw/france-latest.osm.pbf 31 81   # un extrait par département (osmium)
+uv run flat-segments department 31 --pbf data/osm/31.osm.pbf
+uv run flat-segments export-pmtiles data/departments/*/segments.parquet --previous web/data
+```
+
+`--previous` garde les identifiants du jeu déjà publié : les liens partagés
+continuent de fonctionner ([ADR 0012](docs/adr/0012-identifiants-stables.md)).
 
 Si Geofabrik est inaccessible, `download-osm --url` accepte le miroir
 d'OpenStreetMap France (voir [`docs/data-sources.md`](docs/data-sources.md#téléchargement)).

@@ -17,6 +17,9 @@ cela, librement, sur toute la France.
   sur l'emprise de la zone pilote. Le miroir d'OpenStreetMap France
   (`download.openstreetmap.fr`, même découpage, avec `.md5`) le remplace quand
   Geofabrik est inaccessible.
+- En production ([ADR 0011](0011-production-github-actions.md)) : l'extrait
+  **France** de Geofabrik (miroir en secours), découpé par département avec
+  osmium (`cut-osm`).
 - Lecture avec **pyosmium** (`osmium` sur PyPI) : lecture en flux filtrée sur
   `highway`, coordonnées des nœuds résolues, **identifiants de nœuds
   conservés**. Reprojection immédiate en Lambert-93.

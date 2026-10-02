@@ -76,7 +76,8 @@ lignes.
     métropole.
   - C'est proche de la limite de 100 Mo par fichier de GitHub : il faudra
     peut-être un fichier par département, ou une publication hors du dépôt
-    Git.
+    Git. C'est la seconde solution qui a été retenue
+    ([ADR 0011](0011-production-github-actions.md)).
 - **GitHub Pages** (vérifié au premier déploiement, [étape 2.2](../phase-2/2.2-tuiles.md)) :
   il compresse le `.pmtiles` si le client envoie `Accept-Encoding: gzip`,
   mais les navigateurs ne l'envoient pas sur les requêtes partielles. Le site

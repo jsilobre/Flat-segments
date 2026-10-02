@@ -1,0 +1,198 @@
+name: Production
+
+# Phase 2.4 (ADR 0011): computes départements in parallel, then publishes the
+# tileset in the release "data-latest", which the Pages workflow deploys.
+# 1. prepare: France OSM extract (Geofabrik, else the openstreetmap.fr
+#    mirror), cut per département into the release "osm-extracts";
+# 2. department: one job per département (OSM extract, DEM, segments);
+# 3. assemble: export-pmtiles with the ids of the published version kept
+#    (ADR 0012), then publication. A failed département blocks it: rerun the
+#    failed jobs, the others keep their results.
+on:
+  workflow_dispatch:
+    inputs:
+      departments:
+        description: "INSEE codes separated by spaces, or 'all' (metropolitan France)"
+        default: "09 12 31 32 46 65 81 82"
+      publish:
+        description: "Publish the result (release data-latest, then the site)"
+        type: boolean
+        default: true
+      max_parallel:
+        description: "Départements computed at once (each sends 4 requests at a time to the IGN)"
+        default: "4"
+
+permissions:
+  contents: write # releases
+  actions: write # start the Pages workflow
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  OSM_URL: https://download.geofabrik.de/europe/france-latest.osm.pbf
+  OSM_MIRROR_URL: https://download.openstreetmap.fr/extracts/europe/france.osm.pbf
+  EXTRACTS_RELEASE: osm-extracts
+  DATA_RELEASE: data-latest
+  WORK: /mnt/work # the larger disk of the runners
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      codes: ${{ steps.codes.outputs.codes }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install osmium
+        run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Work folder
+        run: |
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+          df -h / "$WORK"
+      - name: Département outlines (IGN Admin Express)
+        run: uv run flat-segments download-departments
+      - name: Départements to compute
+        id: codes
+        env:
+          INPUT: ${{ inputs.departments }}
+        run: |
+          if [ "$INPUT" = all ]; then
+            codes=$(uv run flat-segments department-codes)
+          else
+            # shellcheck disable=SC2086 # one argument per code
+            codes=$(uv run flat-segments department-codes $INPUT)
+          fi
+          echo "codes=$codes" >> "$GITHUB_OUTPUT"
+          echo "Départements: $codes" >> "$GITHUB_STEP_SUMMARY"
+      - name: OSM extract of France
+        run: |
+          uv run flat-segments download-osm --url "$OSM_URL" --out-dir "$WORK" --no-clip \
+            || uv run flat-segments download-osm --url "$OSM_MIRROR_URL" --out-dir "$WORK" --no-clip
+          ls -l "$WORK"
+      - name: Cut per département, upload to the release osm-extracts
+        env:
+          CODES: ${{ steps.codes.outputs.codes }}
+        run: |
+          gh release view "$EXTRACTS_RELEASE" > /dev/null 2>&1 \
+            || gh release create "$EXTRACTS_RELEASE" --prerelease --title "Extraits OSM par département" \
+                 --notes "Fichiers intermédiaires du workflow Production (ADR 0011), remplacés à chaque lancement."
+          gh release upload "$EXTRACTS_RELEASE" data/raw/departements.geojson --clobber
+          france=$(ls "$WORK"/france*.osm.pbf)
+          mapfile -t all < <(jq -r '.[]' <<< "$CODES")
+          # Batches of 12: one pass over France each, then upload and free the disk.
+          for ((k = 0; k < ${#all[@]}; k += 12)); do
+            uv run flat-segments cut-osm "$france" "${all[@]:k:12}" --out-dir "$WORK/osm"
+            gh release upload "$EXTRACTS_RELEASE" "$WORK"/osm/*.osm.pbf --clobber
+            rm "$WORK"/osm/*.osm.pbf
+          done
+
+  department:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      matrix:
+        code: ${{ fromJSON(needs.prepare.outputs.codes) }}
+    env:
+      CODE: ${{ matrix.code }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Inputs (OSM extract, outlines)
+        run: |
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+          gh release download "$EXTRACTS_RELEASE" --dir data/raw --clobber \
+            --pattern "$CODE.osm.pbf" --pattern departements.geojson
+      - name: Compute the département
+        run: |
+          uv run flat-segments department "$CODE" --pbf "data/raw/$CODE.osm.pbf" \
+            --root "$WORK/departments"
+          df -h "$WORK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: segments-${{ matrix.code }}
+          retention-days: 7
+          path: |
+            ${{ env.WORK }}/departments/${{ matrix.code }}/segments.parquet
+            ${{ env.WORK }}/departments/${{ matrix.code }}/segments.params.toml
+            ${{ env.WORK }}/departments/${{ matrix.code }}/state.json
+
+  assemble:
+    needs: department
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install tippecanoe
+        run: sudo apt-get update -q && sudo apt-get install -y -q tippecanoe
+      - name: Install dependencies
+        run: uv sync --locked
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: segments-*
+          path: segments
+      - name: Published version (to keep its ids)
+        run: |
+          mkdir previous
+          if gh release download "$DATA_RELEASE" --dir previous; then
+            tar -xzf previous/ids.tar.gz -C previous
+          else
+            # First publication from this workflow: the files still in the repository.
+            cp -r web/data/. previous/
+          fi
+          ls previous
+      - name: Tileset
+        run: |
+          uv run flat-segments export-pmtiles segments/*/segments.parquet \
+            --previous previous --out-dir out | tee export.log
+          tar -czf ids.tar.gz -C out ids
+      - name: Summary
+        run: |
+          {
+            echo "## Départements"
+            uv run flat-segments department-summary segments/*/state.json
+            echo
+            echo "## Jeu publié"
+            echo '```'
+            cat export.log
+            du -h out/segments.pmtiles out/segments.json ids.tar.gz
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish (release data-latest, then the site)
+        if: inputs.publish
+        run: |
+          gh release view "$DATA_RELEASE" > /dev/null 2>&1 \
+            || gh release create "$DATA_RELEASE" --prerelease --title "Données publiées" \
+                 --notes "Jeu publié par le workflow Production (ADR 0011), déployé par le workflow Pages."
+          gh release upload "$DATA_RELEASE" out/segments.pmtiles out/segments.json ids.tar.gz --clobber
+          gh workflow run pages.yml --ref main
+      - name: Keep the tileset for inspection (not published)
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tileset
+          retention-days: 7
+          path: |
+            out/segments.pmtiles
+            out/segments.json
+            ids.tar.gz

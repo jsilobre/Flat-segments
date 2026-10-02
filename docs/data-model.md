@@ -107,8 +107,15 @@ projection Web Mercator) en deux couches.
 
 **`ids/XX.json`** : `{"flat-3fa2b1c9d0e4": [lon, lat], …}`, la position (point
 milieu) de chaque segment.
-- Un fichier par valeur des deux premiers caractères hexadécimaux de
-  l'identifiant (`3f.json`), soit 256 fichiers au plus.
+- Un identifiant d'une version précédente est noté `[lon, lat, cible]` :
+  - `cible` est l'identifiant du segment qui le remplace, et la position est
+    celle de ce segment ;
+  - `cible` vaut `null` si le segment n'existe plus, et la position est celle
+    qu'il avait ([ADR 0012](adr/0012-identifiants-stables.md)).
+- Un fichier par valeur des premiers caractères hexadécimaux de
+  l'identifiant (`3f.json`) : 2 caractères, soit 256 fichiers au plus,
+  jusqu'à 512 000 identifiants, puis un de plus par palier
+  (`tiles.index_prefix_length` dans `segments.json`).
 - Le front s'en sert pour ouvrir un lien `?id=` sans charger tout le jeu.
 
 ## Export GeoJSON (inspection)

@@ -61,7 +61,8 @@ tâches peuvent tourner en parallèle.
      - lancement du workflow Pages ;
      - un département en échec bloque l'assemblage, pour ne pas publier un jeu
        incomplet.
-- **Publication** :
+- **Publication** (depuis l'[ADR 0013](0013-donnees-sur-r2.md), sur
+  Cloudflare R2, la release restant un repli) :
   - le workflow Pages déploie le contenu de `data-latest` avec le site ;
   - les données publiées **sortent de Git** : seul le jeu d'exemple fictif
     reste dans `web/data/sample/` ;

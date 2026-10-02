@@ -183,8 +183,9 @@ Le GeoJSON destiné au web est écrit dans `web/data/`.
     [ADR 0010](adr/0010-geocodage-ign.md), fonctions pures dans
     `geocode.js`).
 - **Données en tuiles vectorielles** ([ADR 0009](adr/0009-pmtiles-tippecanoe.md),
-  [étape 2.2](phase-2/2.2-tuiles.md)) : `data/segments.pmtiles` (déployé
-  depuis la release `data-latest`), lu par le
+  [étape 2.2](phase-2/2.2-tuiles.md)) : le fichier PMTiles à l'adresse donnée
+  par `data/segments.json` (sur Cloudflare R2, [ADR 0013](adr/0013-donnees-sur-r2.md)),
+  lu par le
   protocole `pmtiles://` (requêtes partielles, sans serveur).
   - Couche `segments` (zooms 12 à 14), avec tous les attributs ; couche
     `overview` (zooms 8 à 11), allégée, pour la vue d'ensemble.
@@ -337,7 +338,7 @@ recalés à l'échelle régionale.
 | **2.2 PMTiles et front sur tuiles** *(faite, [rapport](phase-2/2.2-tuiles.md))* | `export-pmtiles` (détail z12–14, vue d'ensemble z8–11, index des identifiants) ; front sur tuiles (décodeur MVT, liste à partir des tuiles z12, liens directs par index) ; Haute-Garonne publiée | Service par GitHub Pages vérifié (les navigateurs ne demandent pas de gzip sur les requêtes partielles) |
 | **2.3 Ex-Midi-Pyrénées** *(fusionnée dans 2.4, en ligne)* | 8 départements (09, 12, 31, 32, 46, 65, 81, 82) publiés sur GitHub Pages : 48 444 plats et 301 601 côtes. Reste la campagne de validation 2 en zones rurales et en montagne | 155 Mo de PMTiles ; couverture LiDAR HD complète sur les 8 départements |
 | **2.4 Production automatisée** *(faite, [rapport](phase-2/2.4-production.md))* | Workflow GitHub Actions ([ADR 0011](adr/0011-production-github-actions.md)) : renumérotation et découpe OSM, une tâche par département, assemblage, publication dans la release `data-latest` déployée par Pages, données hors de Git. Identifiants conservés d'une version à l'autre ([ADR 0012](adr/0012-identifiants-stables.md)). Ex-Midi-Pyrénées en 57 min | Débit du service de l'IGN variable (1,3 à 5,3 s par dalle) ; régénération à la main |
-| **2.5 France métropolitaine** | 96 départements, PMTiles (1 à 2 Go estimés) sur un stockage d'objets (type Cloudflare R2) | Changement d'hébergement, CORS et requêtes partielles |
+| **2.5 France métropolitaine** *(en cours)* | Publication sur Cloudflare R2 ([ADR 0013](adr/0013-donnees-sur-r2.md)), essai sur l'Occitanie (13 départements), puis les 96 départements (1,5 à 2 Go estimés) | Tenue de l'IGN à 8 départements à la fois ; mémoire et durée de l'assemblage |
 
 ## 6. Qualité et outillage
 

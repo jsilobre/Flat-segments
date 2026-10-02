@@ -3,7 +3,8 @@ name: Production
 # Phase 2.4 (ADR 0011): computes départements in parallel, then publishes the
 # tileset in the release "data-latest", which the Pages workflow deploys.
 # 1. prepare: France OSM extract (Geofabrik, else the openstreetmap.fr
-#    mirror), cut per département into the release "osm-extracts";
+#    mirror), nodes renumbered (osmium needs memory in proportion to the
+#    largest node id), cut per département into the release "osm-extracts";
 # 2. department: one job per département (OSM extract, DEM, segments);
 # 3. assemble: export-pmtiles with the ids of the published version kept
 #    (ADR 0012), then publication. A failed département blocks it: rerun the
@@ -78,6 +79,11 @@ jobs:
           uv run flat-segments download-osm --url "$OSM_URL" --out-dir "$WORK" --no-clip \
             || uv run flat-segments download-osm --url "$OSM_MIRROR_URL" --out-dir "$WORK" --no-clip
           ls -l "$WORK"
+      - name: Number the nodes from 1 (memory of the cut, see osm_extracts.py)
+        run: |
+          france=$(ls "$WORK"/france*.osm.pbf)
+          uv run flat-segments renumber-osm "$france" "$WORK/renumbered.osm.pbf"
+          rm "$france"
       - name: Cut per département, upload to the release osm-extracts
         env:
           CODES: ${{ steps.codes.outputs.codes }}
@@ -86,7 +92,7 @@ jobs:
             || gh release create "$EXTRACTS_RELEASE" --prerelease --title "Extraits OSM par département" \
                  --notes "Fichiers intermédiaires du workflow Production (ADR 0011), remplacés à chaque lancement."
           gh release upload "$EXTRACTS_RELEASE" data/raw/departements.geojson --clobber
-          france=$(ls "$WORK"/france*.osm.pbf)
+          france="$WORK/renumbered.osm.pbf"
           mapfile -t all < <(jq -r '.[]' <<< "$CODES")
           # Batches of 12: one pass over France each, then upload and free the disk.
           for ((k = 0; k < ${#all[@]}; k += 12)); do

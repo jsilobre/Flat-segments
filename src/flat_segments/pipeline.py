@@ -68,25 +68,57 @@ def run_elevation(
     out: Path,
     params: PipelineParams,
     source: str | None = None,
-) -> int:
+    fallback: Path | None = None,
+) -> tuple[int, int]:
     """Sample the DEM along every stroke.
 
     ``source`` defaults to the one recorded in the raster (``download-dem``
-    tags its tiles and VRT), else ``rge_alti_1m``.
+    tags its tiles and VRT), else ``rge_alti_1m``. With a ``fallback`` raster
+    (``download_dem(fallback_layer=...)``), a stroke with missing elevations
+    is sampled again on it when its profile has gaps that cannot be filled
+    (not under a bridge or a tunnel, longer than ``max_gap_fill_m``). Its
+    fallback profile is kept, whole, when it leaves fewer such gaps: one
+    source per stroke.
 
     Returns:
-        Number of profiles written.
+        Number of profiles written, and how many of them come from ``fallback``.
     """
+    import numpy as np
+
     from flat_segments.elevation import DEFAULT_SOURCE, RasterDem, raster_source, sample_stroke
     from flat_segments.export import ProfileTable, read_strokes, write_profiles
+    from flat_segments.geometry import FloatArray, resample
+    from flat_segments.network import Stroke
+    from flat_segments.profile import fill_profile
 
     if source is None:
         source = raster_source(dem) or DEFAULT_SOURCE
     all_strokes = read_strokes(strokes)
     with RasterDem(dem) as sampler:
         z_raw = {s.id: sample_stroke(s.coords, sampler, params.profile) for s in all_strokes}
-    write_profiles(ProfileTable(z_raw, params.profile.step_m, source), out)
-    return len(z_raw)
+    source_by_stroke: dict[str, str] = {}
+    if fallback is not None:
+        fallback_source = raster_source(fallback) or DEFAULT_SOURCE
+
+        def unfilled(stroke: Stroke, z: FloatArray) -> int:
+            """Samples left without elevation once bridges, tunnels and short gaps are filled."""
+            distances, _ = resample(stroke.coords, params.profile.step_m)
+            filled, *_ = fill_profile(distances, z, stroke.structures(), params.profile)
+            return int(np.isnan(filled).sum())
+
+        with RasterDem(fallback) as sampler:
+            for stroke in all_strokes:
+                if not np.isnan(z_raw[stroke.id]).any():
+                    continue
+                missing = unfilled(stroke, z_raw[stroke.id])
+                if missing == 0:
+                    continue  # e.g. water under a bridge: the main profile is complete
+                z = sample_stroke(stroke.coords, sampler, params.profile)
+                if unfilled(stroke, z) < missing:
+                    z_raw[stroke.id] = z
+                    source_by_stroke[stroke.id] = fallback_source
+    write_profiles(ProfileTable(z_raw, params.profile.step_m, source, source_by_stroke), out)
+    return len(z_raw), len(source_by_stroke)
 
 
 def run_detect(strokes: Path, profiles: Path, out: Path, params: PipelineParams) -> list[Segment]:
@@ -103,7 +135,9 @@ def run_detect(strokes: Path, profiles: Path, out: Path, params: PipelineParams)
             f"profiles sampled every {table.step_m} m, expected {params.profile.step_m} m: "
             "rerun `elevation` with the same profile.step_m"
         )
-    segments = detect_all(read_strokes(strokes), table.z_raw, params, table.elevation_source)
+    segments = detect_all(
+        read_strokes(strokes), table.z_raw, params, table.elevation_source, table.source_by_stroke
+    )
     write_segments(segments, out)
     params_sidecar(out).write_text(params_to_toml(params), encoding="utf-8")
     return segments

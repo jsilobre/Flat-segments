@@ -144,7 +144,7 @@ def elevation(
 ) -> None:
     """Sample the DEM along every stroke."""
     params = get_params(config, overrides)
-    count = steps.run_elevation(dem, strokes, out, params, source)
+    count, _ = steps.run_elevation(dem, strokes, out, params, source)
     typer.echo(f"{count} profiles -> {out}")
 
 

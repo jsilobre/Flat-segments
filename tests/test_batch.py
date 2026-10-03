@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 import pytest
+from pyproj import Transformer
 from shapely.geometry import LineString, box, mapping
 from typer.testing import CliRunner
 
@@ -12,7 +14,7 @@ from flat_segments.config import load_params
 from flat_segments.departments import load_department
 from flat_segments.detect import SegmentKind
 from flat_segments.export import read_segments
-from flat_segments.params import PipelineParams
+from flat_segments.params import WEB_CRS, WORK_CRS, PipelineParams
 from tests.test_departments import collection
 from tests.test_download import FakeWeb
 
@@ -62,7 +64,7 @@ def run(
     root: Path,
     web: FakeWeb,
     params: PipelineParams | None = None,
-    **kwargs: bool,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     pbf, outlines = inputs
     return batch.run_department(
@@ -94,7 +96,52 @@ def test_department_keeps_the_segments_whose_midpoint_is_inside(
     assert segment.elevation_source == "lidar_hd"
     assert not paths.dem_dir.exists()  # deleted once sampled
     assert paths.params.exists()
-    assert len(web.requests) == state["steps"]["dem"]["tiles"] > 0
+    assert len(web.requests) == state["steps"]["dem"]["tiles"] > 0  # no fallback tile
+    assert (state["steps"]["dem"]["fallback_tiles"], state["steps"]["profiles"]["fallback"]) == (
+        0,
+        0,
+    )
+
+
+def patchy_wms(missing_m: float) -> Callable[[str], bytes]:
+    """``gentle_wms``, without LiDAR HD over ``missing_m`` west of the middle of the ways."""
+    middle_x, _ = Transformer.from_crs(WEB_CRS, WORK_CRS, always_xy=True).transform(1.5375, 43.53)
+
+    def answer(url: str) -> bytes:
+        query = parse_qs(urlsplit(url).query)
+        if query["LAYERS"][0] == download.WMS_FALLBACK_LAYER:
+            return gentle_wms(url)
+        min_x, _, max_x, _ = (float(v) for v in query["BBOX"][0].split(","))
+        width = int(query["WIDTH"][0])
+        xs = min_x + (max_x - min_x) / width * (np.arange(width) + 0.5)
+        grid = np.frombuffer(gentle_wms(url), "<f4").reshape(-1, width).copy()
+        grid[:, (xs < middle_x) & (xs > middle_x - missing_m)] = -9999.0
+        return grid.astype("<f4").tobytes()
+
+    return answer
+
+
+def test_department_falls_back_on_the_rge_alti_where_the_lidar_hd_is_missing(
+    inputs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    state = run(inputs, tmp_path, FakeWeb({download.WMS_URL: patchy_wms(5000.0)}))
+    assert state["steps"]["dem"]["fallback_tiles"] > 0
+    assert state["steps"]["profiles"]["fallback"] == 2  # A and B, each half missing
+    [segment] = read_segments(batch.department_paths(tmp_path / "31").segments)
+    assert segment.elevation_source == "rge_alti_wms"  # the whole stroke
+    assert segment.length_m > 1500
+
+
+def test_department_keeps_the_lidar_hd_across_gaps_it_can_fill(
+    inputs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    # 20 m pixels here: a missing pixel leaves about 60 m without elevation.
+    params = load_params(None, ["profile.max_gap_fill_m=100"])
+    state = run(inputs, tmp_path, FakeWeb({download.WMS_URL: patchy_wms(8.0)}), params)
+    assert state["steps"]["dem"]["fallback_tiles"] > 0  # fetched, but not needed
+    assert state["steps"]["profiles"]["fallback"] == 0
+    [segment] = read_segments(batch.department_paths(tmp_path / "31").segments)
+    assert segment.elevation_source == "lidar_hd"
 
 
 def test_department_resumes_and_refuses_other_parameters(

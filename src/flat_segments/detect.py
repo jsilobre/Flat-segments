@@ -607,8 +607,11 @@ def detect_all(
     z_raw_by_stroke: Mapping[str, FloatArray],
     params: PipelineParams | None = None,
     elevation_source: str = "rge_alti_1m",
+    source_by_stroke: Mapping[str, str] | None = None,
 ) -> list[Segment]:
     """Run detection on every stroke that has a profile, then deduplicate.
+
+    ``source_by_stroke`` overrides ``elevation_source`` for some strokes.
 
     Returns:
         Segments sorted by kind, then decreasing score.
@@ -620,6 +623,7 @@ def detect_all(
         if z_raw is None:
             continue
         profile = build_profile(stroke.coords, z_raw, params.profile, stroke.structures())
-        segments.extend(detect_stroke(stroke, profile, params, elevation_source))
+        source = (source_by_stroke or {}).get(stroke.id, elevation_source)
+        segments.extend(detect_stroke(stroke, profile, params, source))
     unique = deduplicate(segments, params.detection.dedup, params.profile.step_m)
     return sorted(assign_unique_ids(unique), key=lambda s: (s.kind.value, -s.score, s.id))

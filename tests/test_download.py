@@ -187,6 +187,61 @@ def test_download_dem_replaces_tiles_from_another_layer(tmp_path: Path) -> None:
     assert raster_source(vrt) == "rge_alti_wms"
 
 
+def patchy_wms(url: str) -> bytes:
+    """LiDAR HD missing west of x = 1100 (nodata -9999); the RGE ALTI is the plane + 1."""
+    query = parse_qs(urlsplit(url).query)
+    grid = np.frombuffer(fake_wms(url), "<f4").copy()
+    if query["LAYERS"][0] == dl.WMS_LAYER_RGE_ALTI:
+        return (grid + 1.0).astype("<f4").tobytes()
+    min_x, _, max_x, _ = (float(v) for v in query["BBOX"][0].split(","))
+    width = int(query["WIDTH"][0])
+    xs = min_x + (max_x - min_x) / width * (np.arange(width) + 0.5)
+    rows = grid.reshape(-1, width)
+    rows[:, xs < 1100] = -9999.0
+    return rows.astype("<f4").tobytes()
+
+
+def test_download_dem_fetches_the_fallback_layer_where_tiles_have_nodata(tmp_path: Path) -> None:
+    web = FakeWeb({dl.WMS_URL: patchy_wms})
+    bounds = (1000.0, 2000.0, 1600.0, 2200.0)  # three 200 m tiles, the first one patchy
+    seen: list[int] = []
+    vrt = dl.download_dem(
+        bounds,
+        tmp_path,
+        web,
+        tile_size_m=200,
+        resolution_m=5,
+        fallback_layer=dl.WMS_FALLBACK_LAYER,
+        on_tile=lambda i, n, t: seen.append(n),
+    )
+    assert dl.WMS_FALLBACK_LAYER == dl.WMS_LAYER_RGE_ALTI
+    assert len(web.requests) == 4  # three LiDAR HD tiles, one RGE ALTI tile
+    assert "HIGHRES" in web.requests[-1]
+    assert "BBOX=1000.0%2C2000.0%2C1200.0" in web.requests[-1]
+    assert seen == [3, 3, 3]  # only the main layer is reported
+    fallback = dl.fallback_vrt_path(vrt)
+    assert fallback == tmp_path / "pilot.fallback.vrt"
+    assert raster_source(fallback) == "rge_alti_wms"
+    with RasterDem(fallback) as dem:
+        z = dem.sample(np.array([[1050.0, 2100.0], [1300.0, 2100.0]]))
+    assert z[0] == pytest.approx(plane(np.array(1050.0), np.array(2100.0)) + 1.0)
+    assert np.isnan(z[1])  # outside the patchy tile
+    dl.download_dem(
+        bounds, tmp_path, web, tile_size_m=200, resolution_m=5, fallback_layer=dl.WMS_FALLBACK_LAYER
+    )
+    assert len(web.requests) == 4  # both layers resumed
+    dl.download_dem(
+        bounds,
+        tmp_path,
+        FakeWeb({dl.WMS_URL: fake_wms}),
+        tile_size_m=200,
+        resolution_m=5,
+        fallback_layer=dl.WMS_FALLBACK_LAYER,
+        force=True,
+    )
+    assert not fallback.exists()  # no nodata any more: no stale fallback
+
+
 def test_download_dem_replaces_tiles_from_another_grid(tmp_path: Path) -> None:
     web = FakeWeb({dl.WMS_URL: fake_wms})
     bounds = (1000.0, 2000.0, 1400.0, 2400.0)

@@ -62,9 +62,12 @@ sans frais de trafic.
   Pages ne contient plus que le code et `segments.json`.
 - **Coût** : une recherche coûte 15 à 45 lectures. Les 10 millions de
   lectures gratuites couvrent donc plus de 200 000 recherches par mois.
+- **Volume** de la France : 1,81 Go de PMTiles, plus l'index des
+  identifiants ([étape 2.5](../phase-2/2.5-france.md)).
 - **Latence** : sans cache, R2 peut mettre plusieurs centaines de
-  millisecondes par requête. Le domaine à soi, avec le cache Cloudflare,
-  l'améliorera.
+  millisecondes par requête. Mesure de l'étape 2.5 par `r2.dev` : 1,2 à
+  2,5 s par requête (médiane par recherche), 3 à 7 s pour afficher les
+  résultats. Le domaine à soi, avec le cache Cloudflare, l'améliorera.
 - **Dépendance** : un compte Cloudflare devient nécessaire au projet.
 
 ## Alternatives considérées

@@ -98,7 +98,7 @@ bâtiments ni végétation.
 | Origine | Programme LiDAR HD : levés LiDAR aéroportés récents | Mosaïque de sources : LiDAR, radar ou corrélation d'images |
 | Pas d'origine | 50 cm | 1 m (et une version à 5 m) |
 | Précision | décimétrique partout | de 20 cm (zones LiDAR) à métrique, voire plus en relief marqué (corrélation) |
-| Couverture | France métropolitaine en cours d'achèvement ; **toute la zone pilote** est couverte | France métropolitaine et DROM |
+| Couverture | France métropolitaine en cours d'achèvement : 92,5 % de la surface au 03/10/2026 ([étape 2.5](phase-2/2.5-france.md#couverture-du-mnt-lidar-hd)) ; **toute la zone pilote** est couverte | France métropolitaine et DROM |
 | `elevation_source` | `lidar_hd` | `rge_alti_1m` (archive) ou `rge_alti_wms` (WMS) |
 
 Pourquoi un MNT au mètre ([ADR 0003](adr/0003-altitude-rge-alti-1m.md),
@@ -166,6 +166,12 @@ incapable : une seule maille couvre 15 % du segment.
 
    C'est léger à télécharger, mais cela dépend d'un service en ligne et c'est
    moins reproductible qu'une archive.
+
+   **Repli automatique** : la production par département (`department`)
+   télécharge aussi en RGE ALTI, par le même WMS, les dalles LiDAR HD qui ont
+   des valeurs *nodata*. Elle les assemble dans un second VRT
+   (`dem.fallback.vrt`). Un stroke resté avec des trous est relu dedans
+   ([`algorithm.md` § 3](algorithm.md#3-échantillonnage-de-laltitude)).
 
 2. **Repli manuel : archive RGE ALTI 1 m départementale**, là où le LiDAR HD
    manque. Pour la Haute-Garonne (31), l'édition du 26/11/2024 est listée sur

@@ -71,6 +71,10 @@ sondage sur 98, un par dalle de 2 km.
 - La couverture LiDAR HD de la France n'est pas encore complète. Pour une
   nouvelle zone, il faut la vérifier (valeur *nodata* `-9999` hors
   couverture) et passer au RGE ALTI si besoin.
+  - Au 03/10/2026, le LiDAR HD manque sur 8 % de la métropole, dans 21
+    départements ([étape 2.5](../phase-2/2.5-france.md#couverture-du-mnt-lidar-hd)).
+  - La production par département n'applique pas encore ce repli : ces
+    zones n'ont aucun segment.
 - Une dépendance au service WMS demeure : on télécharge un extrait
   rééchantillonné au mètre, pas le produit d'origine à 50 cm.
 

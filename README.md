@@ -68,7 +68,10 @@ l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
   d'une version publiée à l'autre ([2.4](docs/phase-2/2.4-production.md)).
 - **Ex-Midi-Pyrénées en ligne** : 8 départements, 48 444 plats et 301 601
   côtes, calculés en 57 min.
-- Prochaine étape : la France métropolitaine (2.5), sur un stockage d'objets.
+- **France métropolitaine en ligne** : 968 556 plats et 2 892 366 côtes,
+  publiés sur Cloudflare R2 ([2.5](docs/phase-2/2.5-france.md)). Il manque
+  encore les zones où l'IGN n'a pas publié le MNT LiDAR HD (8 % du
+  territoire, dont Lille).
 
 Zone pilote : **Labège / Caraman** (sud-est de Toulouse, Haute-Garonne),
 emprise `1.48,43.48,1.80,43.59` (lon/lat WGS84).

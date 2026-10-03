@@ -68,7 +68,7 @@ l'[ADR 0008](docs/adr/0008-couverture-nationale-precalcul-statique.md) et le
   d'une version publiée à l'autre ([2.4](docs/phase-2/2.4-production.md)).
 - **Ex-Midi-Pyrénées en ligne** : 8 départements, 48 444 plats et 301 601
   côtes, calculés en 57 min.
-- **France métropolitaine en ligne** : 968 556 plats et 2 892 366 côtes,
+- **France métropolitaine en ligne** : 1 050 675 plats et 3 113 675 côtes,
   publiés sur Cloudflare R2 ([2.5](docs/phase-2/2.5-france.md)). Là où
   l'IGN n'a pas encore publié le MNT LiDAR HD (7,5 % du territoire, dont
   Lille), la production passe sur le RGE ALTI.

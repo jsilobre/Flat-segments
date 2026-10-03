@@ -228,7 +228,7 @@ et du pas.
 | `stroke_id` | `str` | Clé vers `strokes` |
 | `step_m` | `float` | Pas demandé (`profile.step_m`) ; le pas effectif est `length_m / ceil(length_m / step_m)` |
 | `z_raw` | `list<float64>` | Altitudes brutes aux points de la grille, `NaN` = *nodata* |
-| `elevation_source` | `str` | Source d'altitude |
+| `elevation_source` | `str` | Source d'altitude du stroke : `lidar_hd`, ou `rge_alti_wms` pour un stroke relu dans le RGE ALTI là où le LiDAR HD manque ([`algorithm.md` § 3](algorithm.md#3-échantillonnage-de-laltitude)) |
 
 ## Évolution vers PostGIS (phase 3)
 

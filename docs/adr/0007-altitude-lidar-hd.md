@@ -71,10 +71,10 @@ sondage sur 98, un par dalle de 2 km.
 - La couverture LiDAR HD de la France n'est pas encore complète. Pour une
   nouvelle zone, il faut la vérifier (valeur *nodata* `-9999` hors
   couverture) et passer au RGE ALTI si besoin.
-  - Au 03/10/2026, le LiDAR HD manque sur 8 % de la métropole, dans 21
-    départements ([étape 2.5](../phase-2/2.5-france.md#couverture-du-mnt-lidar-hd)).
-  - La production par département n'applique pas encore ce repli : ces
-    zones n'ont aucun segment.
+  - Au 03/10/2026, le LiDAR HD manque sur 7,5 % de la métropole ; 23
+    départements en ont plus de 1 % sans ([étape 2.5](../phase-2/2.5-france.md#couverture-du-mnt-lidar-hd)).
+  - La production par département applique le repli depuis le 03/10/2026
+    (amendement ci-dessous). Avant, ces zones n'avaient aucun segment.
 - Une dépendance au service WMS demeure : on télécharge un extrait
   rééchantillonné au mètre, pas le produit d'origine à 50 cm.
 
@@ -108,3 +108,27 @@ au pas de 2 m, en dalles de 4 km (2000 × 2000 px, 16 Mo par requête),
 4 km**. L'échantillonnage bilinéaire tous les 5 m et le lissage (σ = 10 m)
 restent inchangés : ils lissent de toute façon sous l'échelle de 2 m.
 L'option `--resolution-m 1 --tile-size-m 2000` redonne l'ancien réglage.
+
+## Amendement du 03/10/2026 : repli automatique dans la production
+
+La France publiée le 03/10/2026 n'avait aucun segment là où le LiDAR HD
+manque : 7,5 % de la métropole, dont Lille
+([étape 2.5](../phase-2/2.5-france.md#couverture-du-mnt-lidar-hd)). La
+production par département applique désormais le repli de cet ADR.
+
+- **Dalles** : celles du LiDAR HD qui ont des valeurs *nodata* sont aussi
+  téléchargées en RGE ALTI par le WMS, dans un second VRT.
+- **Strokes** : un stroke dont le profil garde des trous impossibles à
+  combler (hors ponts et tunnels, plus longs que 20 m) est relu dans le
+  RGE ALTI. Ce second profil remplace le premier en entier s'il en laisse
+  moins.
+  - Un segment n'a donc qu'une source, `lidar_hd` ou `rge_alti_wms`.
+  - L'attribution du jeu publié cite les deux.
+- **Qualité** : celle mesurée plus haut sur la zone pilote. Le RGE ALTI
+  retrouve 92 % des km de plats et 97 % des km de côtes du LiDAR HD ; les
+  plats manqués sont courts et proches des seuils. Le front ne distingue pas
+  ces segments.
+- **Évolution** : quand l'IGN publie le LiDAR HD d'une zone, la régénération
+  suivante l'utilise. Le rapprochement à 10 m
+  ([ADR 0012](0012-identifiants-stables.md)) garde alors les identifiants des
+  segments peu déplacés.

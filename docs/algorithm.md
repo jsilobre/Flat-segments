@@ -121,6 +121,16 @@ qui se prolonge en rue résidentielle. Il ne franchit jamais une route `MAJOR`.
    valeurs. Cela limite l'effet d'une géométrie OSM décalée sur un talus. Désactivé
    par défaut (0 m), à évaluer en phase 1.
 4. Les valeurs *nodata* du MNT deviennent `NaN`.
+5. **Repli sur le RGE ALTI** (production par département, depuis le
+   03/10/2026, [ADR 0007](adr/0007-altitude-lidar-hd.md)). Là où le LiDAR HD
+   n'est pas encore publié, un stroke peut garder des trous que l'étape 4 ne
+   comble pas : hors des ponts et tunnels, et plus longs que
+   `[profile.max_gap_fill_m]`.
+   - Le stroke est alors relu dans le RGE ALTI (WMS, `rge_alti_wms`).
+   - Ce second profil remplace le premier, **en entier**, s'il laisse moins
+     de tels trous.
+   - Chaque segment n'a donc qu'une source, celle de son stroke.
+   - Un trou comblé, sous un pont par exemple, ne déclenche pas le repli.
 
 Sortie : `z_raw`, un tableau aligné sur la grille, stocké dans
 `profiles.parquet`. Les étapes suivantes (4 à 6) sont recalculées à chaque

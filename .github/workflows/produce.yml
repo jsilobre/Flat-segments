@@ -14,6 +14,8 @@ name: Production
 #    failed jobs, the others keep their results.
 # With reuse_run, only the assembly runs, on the départements of an earlier
 # run (its artifacts are kept 7 days): to republish after a fix in the export.
+# With keep_run, only the listed départements are computed, and the assembly
+# takes the others from that earlier run: to redo a few départements.
 on:
   workflow_dispatch:
     inputs:
@@ -29,6 +31,9 @@ on:
         default: "4"
       reuse_run:
         description: "Only assemble, from the départements of this earlier run id (departments is then ignored)"
+        default: ""
+      keep_run:
+        description: "Assemble the départements computed now with the other ones of this earlier run id"
         default: ""
 
 permissions:
@@ -221,6 +226,25 @@ jobs:
         with:
           pattern: segments-*
           path: segments
+      - name: Other départements, from run ${{ inputs.keep_run }}
+        if: inputs.reuse_run == '' && inputs.keep_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: segments-*
+          path: kept
+          run-id: ${{ inputs.keep_run }}
+          github-token: ${{ github.token }}
+      - name: Add the départements not computed now
+        if: inputs.reuse_run == '' && inputs.keep_run != ''
+        run: |
+          added=0
+          for dir in kept/segments-*; do
+            name=$(basename "$dir")
+            [ -e "segments/$name" ] || { mv "$dir" "segments/$name"; added=$((added + 1)); }
+          done
+          echo "$added départements added from run $KEEP_RUN"
+        env:
+          KEEP_RUN: ${{ inputs.keep_run }}
       - name: Départements of run ${{ inputs.reuse_run }}
         if: inputs.reuse_run != ''
         uses: actions/download-artifact@v4

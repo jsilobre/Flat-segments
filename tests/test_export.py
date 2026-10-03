@@ -122,3 +122,14 @@ def test_negative_zero_is_normalised() -> None:
     [segment] = sample_segments()
     props = ex.segment_properties(replace(segment, grade_mean_pct=-0.001))
     assert str(props["grade_mean_pct"]) == "0.0"
+
+
+def test_profiles_keep_the_source_of_each_stroke(tmp_path: Path) -> None:
+    z = {f"s{i}": np.array([1.0, 2.0]) for i in range(3)}
+    table = ex.ProfileTable(z, 5.0, "lidar_hd", {"s1": "rge_alti_wms"})
+    path = tmp_path / "profiles.parquet"
+    ex.write_profiles(table, path)
+    back = ex.read_profiles(path)
+    assert back.elevation_source == "lidar_hd"  # the most common one
+    assert back.source_by_stroke == {"s1": "rge_alti_wms"}
+    assert [back.source_of(s) for s in z] == ["lidar_hd", "rge_alti_wms", "lidar_hd"]

@@ -12,8 +12,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -278,11 +279,20 @@ def read_strokes(path: Path) -> list[Stroke]:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ProfileTable:
-    """Raw elevation samples of every stroke (table ``profiles``)."""
+    """Raw elevation samples of every stroke (table ``profiles``).
+
+    ``elevation_source`` is the source of most strokes; ``source_by_stroke``
+    names the others (strokes sampled on the fallback DEM).
+    """
 
     z_raw: dict[str, FloatArray]
     step_m: float
     elevation_source: str
+    source_by_stroke: dict[str, str] = field(default_factory=dict)
+
+    def source_of(self, stroke_id: str) -> str:
+        """Elevation source of a stroke."""
+        return self.source_by_stroke.get(stroke_id, self.elevation_source)
 
 
 def write_profiles(table: ProfileTable, path: Path) -> None:
@@ -296,7 +306,7 @@ def write_profiles(table: ProfileTable, path: Path) -> None:
             "stroke_id": pa.array(ids, pa.string()),
             "step_m": pa.array([table.step_m] * len(ids), pa.float64()),
             "z_raw": pa.array([table.z_raw[i].tolist() for i in ids], pa.list_(pa.float64())),
-            "elevation_source": pa.array([table.elevation_source] * len(ids), pa.string()),
+            "elevation_source": pa.array([table.source_of(i) for i in ids], pa.string()),
         }
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,20 +317,29 @@ def read_profiles(path: Path) -> ProfileTable:
     """Read raw profiles written by :func:`write_profiles`.
 
     Raises:
-        ValueError: If the file mixes several steps or elevation sources.
+        ValueError: If the file mixes several steps.
     """
     import pyarrow.parquet as pq
 
     columns = pq.read_table(path).to_pydict()
-    steps, sources = set(columns["step_m"]), set(columns["elevation_source"])
-    if len(steps) > 1 or len(sources) > 1:
-        raise ValueError(f"{path}: mixed steps {steps} or sources {sources}")
+    steps = set(columns["step_m"])
+    if len(steps) > 1:
+        raise ValueError(f"{path}: mixed steps {steps}")
     z_raw = {
         stroke_id: np.asarray(values, dtype=np.float64)
         for stroke_id, values in zip(columns["stroke_id"], columns["z_raw"], strict=True)
     }
+    sources = Counter(columns["elevation_source"])
+    main = str(sources.most_common(1)[0][0]) if sources else "unknown"
     return ProfileTable(
         z_raw=z_raw,
         step_m=float(steps.pop()) if steps else 0.0,
-        elevation_source=str(sources.pop()) if sources else "unknown",
+        elevation_source=main,
+        source_by_stroke={
+            stroke_id: str(source)
+            for stroke_id, source in zip(
+                columns["stroke_id"], columns["elevation_source"], strict=True
+            )
+            if source != main
+        },
     )

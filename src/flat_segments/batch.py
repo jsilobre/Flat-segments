@@ -36,8 +36,10 @@ from flat_segments.detect import SegmentKind, detect_all
 from flat_segments.download import (
     DEM_RESOLUTION_M,
     DEM_TILE_SIZE_M,
+    WMS_FALLBACK_LAYER,
     Opener,
     download_dem,
+    fallback_vrt_path,
     snap_bounds,
     urlopen,
 )
@@ -109,6 +111,7 @@ def run_department(
     margin_m: float = BORDER_MARGIN_M,
     dem_resolution_m: float = DEM_RESOLUTION_M,
     dem_tile_size_m: float = DEM_TILE_SIZE_M,
+    fallback_layer: str | None = WMS_FALLBACK_LAYER,
     log: Callable[[str], Any] = print,
 ) -> dict[str, Any]:
     """Process one département, resuming after its last finished step.
@@ -125,6 +128,8 @@ def run_department(
         margin_m: Margin around the outline, so that border ways are not cut.
         dem_resolution_m: DEM pixel size.
         dem_tile_size_m: DEM tile size (one national grid of such tiles).
+        fallback_layer: WMS layer fetched where the DEM has nodata (RGE ALTI,
+            ADR 0007); a stroke with missing elevations is sampled on it.
         log: Progress messages.
 
     Returns:
@@ -192,13 +197,29 @@ def run_department(
                 tile_size_m=dem_tile_size_m,
                 resolution_m=dem_resolution_m,
                 area=area_l93,
+                fallback_layer=fallback_layer,
                 vrt_name=paths.dem.name,
                 on_tile=count,
             )
-            finish("dem", start, tiles=n_tiles, mb=round(_dir_size_mb(paths.dem_dir)))
+            fallback = fallback_vrt_path(paths.dem)
+            n_fallback = len(list((paths.dem_dir / "fallback").glob("*.tif")))
+            finish(
+                "dem",
+                start,
+                tiles=n_tiles,
+                fallback_tiles=n_fallback if fallback.exists() else 0,
+                mb=round(_dir_size_mb(paths.dem_dir)),
+            )
         start = time.monotonic()
-        n_profiles = run_elevation(paths.dem, paths.strokes, paths.profiles, params)
-        finish("profiles", start, profiles=n_profiles)
+        fallback = fallback_vrt_path(paths.dem)
+        n_profiles, n_on_fallback = run_elevation(
+            paths.dem,
+            paths.strokes,
+            paths.profiles,
+            params,
+            fallback=fallback if fallback.exists() else None,
+        )
+        finish("profiles", start, profiles=n_profiles, fallback=n_on_fallback)
     if not keep_dem and paths.dem_dir.exists():
         shutil.rmtree(paths.dem_dir)
 
@@ -206,7 +227,11 @@ def run_department(
         start = time.monotonic()
         table = read_profiles(paths.profiles)
         detected = detect_all(
-            read_strokes(paths.strokes), table.z_raw, params, table.elevation_source
+            read_strokes(paths.strokes),
+            table.z_raw,
+            params,
+            table.elevation_source,
+            table.source_by_stroke,
         )
         kept = owned_segments(detected, department.outline_l93())
         write_segments(kept, paths.segments)

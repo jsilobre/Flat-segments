@@ -3,7 +3,8 @@
 * OSM: the Geofabrik regional extract, checked against its ``.md5`` file.
 * DEM: elevation tiles extracted over a bbox from the Géoplateforme WMS
   (raw 32-bit BIL), saved as GeoTIFF tiles and assembled into a GDAL VRT.
-  The default layer is the LiDAR HD terrain model (docs/adr/0007).
+  The default layer is the LiDAR HD terrain model, with the RGE ALTI where it
+  is not published yet (docs/adr/0007).
 
 Network access goes through an injectable ``opener`` so that everything can
 be tested offline.
@@ -48,6 +49,8 @@ WMS_LAYER_LIDAR_HD: Final = "IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.L
 # its effective resolution in Lambert-93 is about 3.5 m x 4.7 m, not 1 m.
 WMS_LAYER_RGE_ALTI: Final = "ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES"
 WMS_LAYER: Final = WMS_LAYER_LIDAR_HD
+# Where the LiDAR HD is not published yet, the RGE ALTI (ADR 0007).
+WMS_FALLBACK_LAYER: Final = WMS_LAYER_RGE_ALTI
 WMS_FORMAT: Final = "image/x-bil;bits=32"
 # Default extraction grid: 2 m pixels in 4 km tiles (2000 x 2000 px, 16 MB per
 # request). As accurate as 1 m for the segments, 3.5 times faster to download
@@ -400,6 +403,20 @@ def _tile_is_current(path: Path, tile: DemTile, source: str) -> bool:
         return same_grid and ds.tags().get(SOURCE_TAG) == source
 
 
+def fallback_vrt_path(vrt_path: Path) -> Path:
+    """VRT of the fallback layer next to the main one (``x.vrt`` -> ``x.fallback.vrt``)."""
+    return vrt_path.with_name(f"{vrt_path.stem}.fallback.vrt")
+
+
+def tile_has_nodata(path: Path) -> bool:
+    """Whether a downloaded tile has nodata pixels (outside the layer's coverage)."""
+    import rasterio
+
+    with rasterio.open(path) as ds:
+        values = ds.read(1)
+        return bool((values == ds.nodata).any() or not np.isfinite(values).all())
+
+
 def download_dem(
     bounds: tuple[float, float, float, float],
     out_dir: Path,
@@ -409,6 +426,7 @@ def download_dem(
     resolution_m: float = DEM_RESOLUTION_M,
     base_url: str = WMS_URL,
     layer: str = WMS_LAYER,
+    fallback_layer: str | None = None,
     vrt_name: str = "pilot.vrt",
     force: bool = False,
     retries: int = 6,
@@ -426,44 +444,84 @@ def download_dem(
     layer's ``elevation_source``. Up to ``workers`` tiles are fetched at once;
     ``on_tile`` is called as tiles complete, with a running count.
 
+    With ``fallback_layer``, the tiles that have nodata pixels (where the
+    main layer is not published yet) are also fetched from that layer, in
+    ``out_dir/fallback``, and assembled in :func:`fallback_vrt_path` (not
+    written when no tile has nodata). ``on_tile`` only follows the main layer.
+
     Returns:
         Path of the VRT (``out_dir / vrt_name``), tiles being in ``out_dir/tiles``.
     """
-    source = source_for_layer(layer)
     tiles = dem_tiles(bounds, tile_size_m, resolution_m)
     if area is not None:
         tiles = tiles_touching(tiles, area)
     paths = [out_dir / "tiles" / tile.name for tile in tiles]
-    done = 0
+    fetch = _TileFetcher(opener, base_url, retries, workers, force, sleep)
+    vrt = fetch(tiles, paths, layer, out_dir / vrt_name, on_tile)
+    fallback_vrt = fallback_vrt_path(vrt)
+    fallback_vrt.unlink(missing_ok=True)
+    if fallback_layer is not None:
+        gaps = [tile for tile, path in zip(tiles, paths, strict=True) if tile_has_nodata(path)]
+        if gaps:
+            gap_paths = [out_dir / "fallback" / tile.name for tile in gaps]
+            fetch(gaps, gap_paths, fallback_layer, fallback_vrt, None)
+    return vrt
 
-    def report(tile: DemTile) -> None:
-        nonlocal done
-        done += 1
-        if on_tile is not None:
-            on_tile(done, len(tiles), tile)
 
-    def fetch(tile: DemTile, path: Path) -> DemTile:
-        url = wms_getmap_url(tile, base_url=base_url, layer=layer)
-        data = fetch_bytes(
-            url, opener, retries=retries, transient_codes=WMS_TRANSIENT_CODES, sleep=sleep
-        )
-        write_tile(path, decode_bil(data, tile.width, tile.height), tile, source=source)
-        return tile
+@dataclass(frozen=True)
+class _TileFetcher:
+    """Fetches tiles of one layer (resumable, a few at once) and builds their VRT."""
 
-    todo = []
-    for tile, path in zip(tiles, paths, strict=True):
-        if force or not _tile_is_current(path, tile, source):
-            todo.append((tile, path))
-        else:
-            report(tile)
-    # A few requests in flight hide the latency of the service (and of dropped
-    # connections) without loading it much.
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = [pool.submit(fetch, tile, path) for tile, path in todo]
-        try:
-            for future in as_completed(futures):
-                report(future.result())
-        except BaseException:
-            pool.shutdown(cancel_futures=True)
-            raise
-    return build_vrt(paths, out_dir / vrt_name, source)
+    opener: Opener
+    base_url: str
+    retries: int
+    workers: int
+    force: bool
+    sleep: Callable[[float], Any]
+
+    def __call__(
+        self,
+        tiles: Sequence[DemTile],
+        paths: Sequence[Path],
+        layer: str,
+        vrt_path: Path,
+        on_tile: Callable[[int, int, DemTile], None] | None,
+    ) -> Path:
+        source = source_for_layer(layer)
+        done = 0
+
+        def report(tile: DemTile) -> None:
+            nonlocal done
+            done += 1
+            if on_tile is not None:
+                on_tile(done, len(tiles), tile)
+
+        def fetch(tile: DemTile, path: Path) -> DemTile:
+            url = wms_getmap_url(tile, base_url=self.base_url, layer=layer)
+            data = fetch_bytes(
+                url,
+                self.opener,
+                retries=self.retries,
+                transient_codes=WMS_TRANSIENT_CODES,
+                sleep=self.sleep,
+            )
+            write_tile(path, decode_bil(data, tile.width, tile.height), tile, source=source)
+            return tile
+
+        todo = []
+        for tile, path in zip(tiles, paths, strict=True):
+            if self.force or not _tile_is_current(path, tile, source):
+                todo.append((tile, path))
+            else:
+                report(tile)
+        # A few requests in flight hide the latency of the service (and of dropped
+        # connections) without loading it much.
+        with ThreadPoolExecutor(max_workers=max(1, self.workers)) as pool:
+            futures = [pool.submit(fetch, tile, path) for tile, path in todo]
+            try:
+                for future in as_completed(futures):
+                    report(future.result())
+            except BaseException:
+                pool.shutdown(cancel_futures=True)
+                raise
+        return build_vrt(list(paths), vrt_path, source)
